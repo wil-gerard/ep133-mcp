@@ -1,5 +1,7 @@
 # ep133-mcp: project brief
 
+> Planning baseline. The [2026-09-07 source audit](docs/research/protocol-audit.md) supersedes the protocol-status claims below: live pad assignment and pattern builders exist upstream, but our hardware proof remains pending.
+
 An MCP server that lets an agent install samples onto a Teenage Engineering EP-133 K.O. II and generate project files for it.
 
 ## Why this exists
