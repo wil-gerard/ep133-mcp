@@ -4,3 +4,9 @@
 
 # Sanitized SysEx capture fixtures are intentionally NOT ignored;
 # scrub serial numbers and sample audio before committing one.
+
+# Pinned upstream checkout used for protocol cross-checks.
+.upstream/
+
+# Transient device state dumps from tools/assign_test.py
+tools/assign_test_state.json

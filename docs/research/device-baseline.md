@@ -48,16 +48,19 @@ device; see [backup verification](backup-verification.md). Read-only session
 again reports OS/software 2.5.1, SKU TE032AS001, capacity 62,853,120 B, free
 4,096,092 B, active project 5. No writes.
 
-**Correction to the "Verified read sequence" above.** Step 5 of that sequence
-claimed "A1 is physical label 1, SysEx position 7, node 7207". Comparing all 432
-pad reads against the backup shows metadata node ids follow the **project TAR
-`pNN`** numbering, not the SysEx `assign_pad` `pad_num` numbering. Physical label
-"1" is TAR `p04`, hence node **7204** in project 5; node 7207 is physical label
-"4". The conclusion that A1 is unassigned survives — both nodes read `sym` = 0 —
-but the addressing claim and the reading of "project 1 A1, sym=1" did not.
+**The "Verified read sequence" above is correct.** Physical label "1" is SysEx
+position 7, node 7207 in project 5. Confirmed on hardware 2026-09-09: an
+authorized `{"sym":14}` write to node 7207 loaded the pad labelled "1", and the
+same write to node 7204 loaded the pad labelled "4". A short-lived revision of
+this file claimed node 7204 was physical "1"; that was wrong and is retracted.
 
-`sym` is the sample-library **slot id**, not a boolean. Project 5 currently has 9
-occupied pads carrying slots 9, 10, 460, 495, 505, 505, 509, 932 and 933.
+What did change is our understanding of the **project TAR**: its `pNN` files use
+the same numbering as the metadata nodes and `assign_pad`, not the bottom-up
+numbering ep133-ppak's `PROTOCOL.md` §3 documents. See
+[backup verification](backup-verification.md).
+
+`sym` is the sample-library **slot id**, not a boolean. Project 5 has 9 occupied
+pads carrying slots 9, 10, 460, 495, 505, 505, 509, 932 and 933.
 
 Pads whose stored slot has since been deleted from the library read `sym` = 0
 live while the project TAR keeps the stale slot id. Occupancy must be read from

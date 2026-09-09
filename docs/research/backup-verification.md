@@ -1,9 +1,13 @@
 # Full backup verification — 2026-09-09
 
 The full sounds-and-projects backup required by [hardware proof](hardware-proof.md)
-step 3 now exists and has been verified against the live device. No device write
-of any kind was performed: every device interaction below is `GREET`,
-read-mode `FILE_INIT` (flags 0) or `FILE_METADATA_GET`.
+step 3 now exists and has been verified against the live device.
+
+Everything up to "Pad addressing" below is read-only — `GREET`, read-mode
+`FILE_INIT` (flags 0) and `FILE_METADATA_GET`. The pad-addressing section rests
+on two authorized writes, each a single `FILE_METADATA_SET` of `{"sym":14}` to a
+pad the device and the backup both reported empty. No sample was uploaded, no
+project file was written, no firmware command was sent.
 
 ## Artifact
 
@@ -77,37 +81,47 @@ across projects.
 Sanitized snapshot: [`fixtures/pad-sym-snapshot-2026-09-09.json`](fixtures/pad-sym-snapshot-2026-09-09.json)
 (slot ids only — no sample names or audio).
 
-## Correction: metadata node numbering follows the TAR pNN, not the SysEx pad_num
+## Pad addressing, resolved on hardware
 
-The [device baseline](device-baseline.md) recorded "A1 is physical label 1,
-SysEx position 7, node 7207", assuming metadata node ids use the same numbering
-as `assign_pad`'s `pad_num`. The 432-pad comparison refutes this.
+Three numbering schemes were in play. Two authorized single-pad writes plus the
+432-pad comparison pin them down, and the answer is that **there is only one
+numbering**: the metadata node suffix, the SysEx `pad_num` and the project TAR's
+`pNN` all use the same index — visual position, top-to-bottom and left-to-right
+(1 = "7", 4 = "4", 7 = "1", 10 = ".").
 
-Two hypotheses were scored against the same live snapshot:
+Evidence, in two parts:
 
-| Hypothesis | Agree | Dangling | Unexplained |
-|---|---|---|---|
-| **A: node `NN` == project TAR `pNN`** | 369 | 63 | **0** |
-| B: node `NN` == SysEx `pad_num` | 254 | 60 | 118 |
+1. *Node suffix corresponds to TAR `pNN`*, from the 432-pad comparison. Scoring
+   both candidate mappings against one live snapshot:
 
-Hypothesis A is confirmed; B is refuted. The clearest single discriminator is
-project 1, group A, node 3204, which reads `sym` = 633 — the slot the backup
-stores at `pads/a/p04`. Hypothesis B predicts slot 1 there, and slot 1 exists in
-the library, so the mismatch cannot be explained away as a dangling reference.
+   | Hypothesis | Agree | Dangling | Unexplained |
+   |---|---|---|---|
+   | node `NN` == TAR `pNN` | 369 | 63 | **0** |
+   | node `NN` == row-reversed TAR `pNN` | 254 | 60 | 118 |
 
-Consequences, using ep133-ppak's `PROTOCOL.md` §3 label table:
+2. *Node suffix corresponds to the physical pad*, from hardware. Writing
+   `{"sym":14}` to node 7204 loaded the pad labelled **"4"**; writing it to node
+   7207 loaded the pad labelled **"1"**. Both match the SysEx `pad_num` table in
+   ep133-ppak's `PROTOCOL.md` §3.
 
-- Metadata node id = `2000 + 1000 × project + 200 + 100 × group + pNN`.
-- Physical pad label **"1"** is TAR `p04`, so in the **active project 5 it is
-  node 7204**, not 7207. Node 7207 is TAR `p07`, physical label **"4"**.
-- The earlier baseline conclusion "project 5 A1 is empty" still holds — nodes
-  7204 and 7207 are both unassigned — but it was read from the wrong node, and
-  "project 1 A1 occupied, sym=1" was actually node 3207 / physical label "4",
-  where `sym` = 1 is the slot id of `001 sleepcycl2.wav` rather than a boolean.
-- `assign_pad(pad_num=…)` still uses the SysEx numbering. Reading a pad and
-  writing it use **different** pad numbers. This is the mistake `PROTOCOL.md`
-  warns lands assignments on the wrong physical pad, and it now has a second
-  form: read-node numbering differs from write numbering.
+Consequences:
+
+- ep133-ppak's `pad_file_id()` and `assign_pad()` are correct as written.
+- **`PROTOCOL.md` §3's TAR↔SysEx translation table is wrong.** It describes the
+  project TAR as bottom-up — `pads/c/p01` as the bottom-left pad — and prescribes
+  a row-reversing translation between TAR and SysEx numbering. A Sample Tool
+  export uses no such reversal: `pads/a/p04` is the pad labelled "4", not "1".
+  Code that applies the documented translation while patching a `.ppak` places
+  every pad in the wrong row. This is the highest-value thing we have to send
+  upstream.
+- The original baseline claim — "A1 is physical label 1, SysEx position 7, node
+  7207" — is correct. An interim revision of this document asserted node 7204
+  instead, reasoning from `PROTOCOL.md`'s TAR table; that was wrong and is
+  retracted.
+
+Scope: verified for *reading* device metadata and for *reading* a Sample Tool
+export. Whether the device applies the same numbering when *importing* a
+hand-built `.ppak` is untested, and is a Phase 2 gate.
 
 ## Correction: the pad-record slot field is u16, not u8
 
@@ -157,9 +171,11 @@ recovery path, and [hardware proof](hardware-proof.md) step 8 remains open.
 ## What this does and does not establish
 
 Established: a complete, readable, checksummed full backup that matches live
-device state pad-for-pad; corrected read-node addressing; a corrected slot field
-width; a documented dangling-slot behaviour.
+device state pad-for-pad; pad addressing pinned down in all three numbering
+schemes, with a concrete error found in upstream's TAR translation table; a
+corrected slot field width; a documented dangling-slot behaviour; and that a
+single-pad metadata write lands on the intended physical pad and reads back.
 
 Not established: that restoring this backup works, that restore is lossless,
-that any write path functions, or that an uploaded sample persists across a
-power cycle.
+that a pad assignment survives a power cycle, or that any sample-upload path
+functions — only pad metadata has been written so far.
