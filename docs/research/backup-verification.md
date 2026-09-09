@@ -152,21 +152,47 @@ the 27-byte stride to `ERR PATTERN 189` on scene-switch iteration, this needs to
 be understood before we emit project files. Recorded as an open question, not
 resolved.
 
-## Restore procedure
+## Restore, demonstrated
 
-Restore is performed with EP Sample Tool by loading a `.pak` back onto the
-device. The **exact UI steps have not been executed or confirmed**, and no
-restore write has been performed. Before any experimental write we must:
+Restore was demonstrated on 2026-09-09 against a real, deliberate difference.
+Two pads in project 5 (nodes 7204 and 7207) had been set to slot 14 by the
+authorized pad-addressing writes above; the device therefore differed from the
+backup in exactly two known places. The owner restored the `.pak` through EP
+Sample Tool, and [`tools/verify_against_backup.py`](../../tools/verify_against_backup.py)
+re-read all 432 pads:
 
-1. Confirm the precise restore path in Sample Tool with the device owner.
-2. Confirm whether restore is additive or replaces the sample library and
-   projects wholesale.
-3. Confirm whether restore preserves library slot ids — if it renumbers slots,
-   every project's pad references shift, and the dangling-slot behaviour above
-   suggests slot identity is load-bearing.
+| Outcome | Pads |
+|---|---|
+| Agree with the backup | 369 |
+| Dangling (backup slot deleted from library, device reports empty) | 63 |
+| Unexplained | **0** |
 
-Until those three are answered, we have a verified backup but an unproven
-recovery path, and [hardware proof](hardware-proof.md) step 8 remains open.
+Both modified nodes returned to `sym` = 0, and `max_capacity` / `free_space_in_bytes`
+came back identical to the pre-restore reading (62,853,120 / 4,096,092).
+
+This is a genuine recovery demonstration rather than a no-op: restoring onto a
+device that already matched the backup would have been indistinguishable from a
+restore that silently did nothing, which is why the two pads were left dirty on
+purpose.
+
+What it establishes: a `.pak` produced by Sample Tool can be loaded back, it
+reverts pad assignments to their backed-up values, and it **preserves library
+slot ids** — the 369 agreements are all slot-id matches, so the fear that
+restore might renumber slots and shift every project's pad references is not
+borne out here.
+
+Still open:
+
+- **Replace vs. merge is undetermined.** The library after restore matches the
+  backup exactly, but the library before restore also matched it (only pad
+  metadata had changed), so this run cannot distinguish a wholesale replace from
+  a merge. Deciding it needs a restore performed while the library differs.
+- The 63 dangling references survived the restore unchanged, which is consistent
+  with restore reproducing the backup faithfully rather than repairing state.
+- Lossiness is unverified. The archive holds 44.1 kHz WAVs while the device
+  reports `samplerate.native` 46875, so whether a restore round-trip is
+  bit-exact on audio is untested — pad metadata is what was checked here.
+- The exact Sample Tool click-path is not yet written down.
 
 ## What this does and does not establish
 
@@ -176,6 +202,9 @@ schemes, with a concrete error found in upstream's TAR translation table; a
 corrected slot field width; a documented dangling-slot behaviour; and that a
 single-pad metadata write lands on the intended physical pad and reads back.
 
-Not established: that restoring this backup works, that restore is lossless,
-that a pad assignment survives a power cycle, or that any sample-upload path
-functions — only pad metadata has been written so far.
+Also established: restoring the backup reverts pad assignments to their backed-up
+values, preserves library slot ids, and leaves the rest of the device untouched.
+
+Not established: that restore is lossless for audio, whether restore replaces or
+merges the library, that a pad assignment survives a power cycle, or that any
+sample-upload path functions — only pad metadata has been written so far.
