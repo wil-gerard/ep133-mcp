@@ -19,6 +19,7 @@ from mcp.server.mcpserver import MCPServer
 
 from . import __version__
 from .audio import deps as audio_deps
+from .audio.analysis import analyze_reference as _analyze_reference
 from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
@@ -215,6 +216,31 @@ def fetch_reference(url: str, start_s: float = 0.0, end_s: float | None = None) 
         return _fetch_reference(url, start_s, end_s)
     except DeviceError as e:
         log.warning("fetch_reference failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="analyze_reference",
+    description=(
+        "Analyze a clip from fetch_reference: tempo (BPM with confidence and half/double "
+        "alternates), key, downbeat, and per-stem onset times, writing stems/*.wav next "
+        "to the clip for extract_kit. Every estimate is probable, not verified; treat bpm, "
+        "key and downbeat as hypotheses and say so. The result names which separator ran "
+        "(separation: 'demucs' htdemucs on CPU, or 'hpss' harmonic/percussive split with "
+        "no vocals stem) and which beat tracker ran (beat_tracker: 'beat_this' with its "
+        "checkpoint, or 'librosa' with the downbeat guessed from kick energy). 'auto' "
+        "prefers demucs and Beat This! and falls back when their weights cannot be loaded; "
+        "the first run of each downloads weights once. Results are cached as analysis.json "
+        "unless force is true. No device I/O. Needs the audio extra; returns "
+        "AudioToolsUnavailable with the install command otherwise."
+    ),
+)
+def analyze_reference(clip: str, separation: str = "auto", beat_tracker: str = "auto",
+                      force: bool = False) -> dict[str, Any]:
+    try:
+        return _analyze_reference(clip, separation, beat_tracker, force)
+    except DeviceError as e:
+        log.warning("analyze_reference failed: %s", e)
         return _error(e)
 
 

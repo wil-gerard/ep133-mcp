@@ -39,6 +39,8 @@ MIN_BPM, MAX_BPM = 40.0, 250.0
 ONSET_GATE = 0.05          # onsets weaker than this fraction of the stem's peak strength are dropped
 SILENT_DBFS = -50.0
 DEMUCS_MODEL = "htdemucs"
+SEPARATIONS = ("auto", "demucs", "hpss")
+BEAT_TRACKERS = ("auto", "beat_this", "librosa")
 BEAT_THIS_CHECKPOINT = "final0"
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 # Krumhansl-Kessler key profiles.
@@ -106,10 +108,17 @@ def separate_demucs(y, sr: int) -> dict[str, Any]:
     return out
 
 
+def check_methods(separation: str, beat_tracker: str) -> None:
+    if separation not in SEPARATIONS:
+        raise InvalidReference("Unknown separation method", observed=separation,
+                               expected=", ".join(SEPARATIONS), next_step="Omit separation to let the server choose.")
+    if beat_tracker not in BEAT_TRACKERS:
+        raise InvalidReference("Unknown beat tracker", observed=beat_tracker,
+                               expected=", ".join(BEAT_TRACKERS), next_step="Omit beat_tracker to let the server choose.")
+
+
 def separate(y, sr: int, method: str = "auto") -> tuple[str, dict[str, Any]]:
-    if method not in ("auto", "demucs", "hpss"):
-        raise InvalidReference("Unknown separation method", observed=method, expected="auto, demucs or hpss",
-                               next_step="Omit separation to let the server choose.")
+    check_methods(method, "auto")
     if method in ("auto", "demucs"):
         try:
             deps.require_modules("demucs", "torch")
@@ -149,9 +158,7 @@ def track_beats_librosa(y, sr: int) -> tuple[list[float], list[float]]:
 
 
 def track_beats(y, sr: int, method: str = "auto") -> tuple[str, list[float], list[float]]:
-    if method not in ("auto", "beat_this", "librosa"):
-        raise InvalidReference("Unknown beat tracker", observed=method, expected="auto, beat_this or librosa",
-                               next_step="Omit beat_tracker to let the server choose.")
+    check_methods("auto", method)
     if method in ("auto", "beat_this"):
         try:
             deps.require_modules("beat_this", "torch")
@@ -259,6 +266,7 @@ def analysis_paths(clip: str | Path) -> tuple[Path, Path]:
 
 def analyze_reference(clip: str | Path, separation: str = "auto", beat_tracker: str = "auto",
                       force: bool = False) -> dict:
+    check_methods(separation, beat_tracker)
     cache, stems_dir = analysis_paths(clip)
     if not force and cache.is_file():
         try:

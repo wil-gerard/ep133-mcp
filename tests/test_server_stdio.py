@@ -29,7 +29,8 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "install_sample", "install_kit", "undo_last_install", "fetch_reference"}
+                     "install_sample", "install_kit", "undo_last_install", "fetch_reference",
+                     "analyze_reference"}
 
 
 @pytest.mark.asyncio
@@ -59,7 +60,40 @@ def test_fetch_reference_without_audio_extra_is_structured(tmp_path, monkeypatch
     assert result["error"] == "AudioToolsUnavailable"
     assert deps.EXTRA_INSTALL in result["next_step"]
     assert module.fetch_reference("https://youtu.be/dQw4w9WgXcQ")["error"] == "AudioToolsUnavailable"
+    analyzed = module.analyze_reference(str(wav), separation="hpss", beat_tracker="librosa")
+    assert analyzed["error"] == "AudioToolsUnavailable"
+    assert deps.EXTRA_INSTALL in analyzed["next_step"]
     assert module.server_status()["audio"]["extra_installed"] is False
+
+
+@pytest.mark.asyncio
+async def test_analyze_reference_through_client(tmp_path):
+    """Fixture clip in, probable estimates out, over the real stdio stream; no model weights."""
+    pytest.importorskip("librosa", reason="audio extra not installed")
+    import synth_reference
+
+    truth = synth_reference.write(tmp_path / "ref", bpm=97.0, bars=4)
+    args = {"clip": str(truth["clip"]), "separation": "hpss", "beat_tracker": "librosa"}
+    async with stdio_client(SERVER) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tool = next(t for t in (await session.list_tools()).tools if t.name == "analyze_reference")
+            assert "probable" in tool.description
+            assert set(tool.input_schema["properties"]) == {"clip", "separation", "beat_tracker", "force"}
+            record = _payload(await session.call_tool("analyze_reference", args))
+            assert record["status"] == "analyzed"
+            assert record["separation"] == {"method": "hpss", "model": None}
+            assert record["beat_tracker"] == {"method": "librosa", "checkpoint": None}
+            assert abs(record["bpm"]["value"] - 97.0) / 97.0 < 0.03 and record["bpm"]["probable"]
+            assert record["key"]["name"] == "A minor"
+            assert record["stems"]["vocals"] is None
+            assert record["stems"]["drums"]["onsets_s"]
+            cached = _payload(await session.call_tool("analyze_reference", {"clip": str(truth["clip"])}))
+            assert cached["status"] == "cached" and cached["bpm"] == record["bpm"]
+            missing = _payload(await session.call_tool("analyze_reference", {"clip": str(tmp_path / "nope.wav")}))
+            assert missing["error"] == "InvalidReference"
+            bad = _payload(await session.call_tool("analyze_reference", {**args, "separation": "spleeter"}))
+            assert bad["error"] == "InvalidReference"
 
 
 def test_device_info_unavailable_is_structured(monkeypatch):
