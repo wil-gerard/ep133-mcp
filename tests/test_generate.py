@@ -218,3 +218,33 @@ def test_generate_ppak_add_form_response(tmp_path):
     assert result["patterns_written"] == {"patterns/a01": {"events": 2, "added": [{"pad": 7, "step": 8}]}}
     assert result["velocity"] is None
     assert pattern_decode.cmd_check(pattern_decode.load_projects(str(tmp_path / "add.ppak"))) == 0
+
+
+def test_events_form_places_ticks_and_durations(tmp_path):
+    """Device recordings are almost never on the 16ths, and carry a note length per event.
+    generate_ppak's events form is what lets a transcription keep both."""
+    import zipfile
+
+    files = minimal_project()
+    source = tmp_path / "src.pak"
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("/meta.json", json.dumps({"pak_type": "user", "device_version": "2.5.1"}))
+        z.writestr("/projects/P03.tar", P.pack_project(files))
+    tar, meta, sounds = G.template_from_pak(source, 3)
+    out = tmp_path / "x.ppak"
+    result = G.generate_ppak(tar, 3, out, meta, patterns=[
+        {"group": "D", "index": 2, "bars": 1, "events": [
+            {"pad": 1, "tick": 0, "duration": 18},
+            {"pad": 2, "tick": 3, "duration": 46},
+            {"pad": 3, "tick": 27, "duration": 94}]}])
+    written = P.unpack_project(P.read_pak(out.read_bytes())[1][3])["patterns/d02"]
+    assert enc.pattern_events(written) == [{"pad": 1, "tick": 0, "duration": 18},
+                                           {"pad": 2, "tick": 3, "duration": 46},
+                                           {"pad": 3, "tick": 27, "duration": 94}]
+    reported = result["patterns_written"]["patterns/d02"]
+    assert reported["events"] == 3 and reported["off_grid_ticks"]["max"] == 3
+    assert reported["steps"] == {1: "x...............", 2: "x...............", 3: ".x.............."}
+    for bad in ({"pad": 1, "tick": 384}, {"pad": 0, "tick": 0}, {"pad": 1, "tick": 0, "duration": 0}):
+        with pytest.raises(G.GenerateError):
+            G.generate_ppak(tar, 3, tmp_path / f"bad{id(bad)}.ppak", meta,
+                            patterns=[{"group": "D", "index": 2, "bars": 1, "events": [bad]}])

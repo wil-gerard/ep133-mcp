@@ -42,6 +42,7 @@ from typing import Any
 
 from .analysis import analyze_reference
 from .errors import InvalidReference
+from ..protocol.patterns import MAX_DURATION as enc_max_duration
 from .kit import DRUM_CLASSES, drum_features, kit_paths
 
 STEPS_PER_BEAT = 4
@@ -64,6 +65,14 @@ HIGH_DOMINANCE = 0.15         # ... and with less than this share of the high ba
 LEAD_IN_S = 0.05              # silence prepended so a hit at t=0 has a rise to detect
 N_FFT = 2048
 HOP = 256
+
+
+def slice_ms(pads: list[dict], cls: str) -> float:
+    """How long the kit's slice for this class is; the note length that plays it whole."""
+    for pad in pads:
+        if pad["class"] == cls:
+            return float(pad.get("duration_ms") or 0.0)
+    return 0.0
 
 
 def groove_path(clip: str | Path) -> Path:
@@ -263,6 +272,12 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     rows = {cls: ["."] * total_steps for cls in pad_of}
     hits = {cls: 0 for cls in pad_of}
     errors: list[float] = []
+    events: list[dict] = []
+    # The device holds a note length per event; its own recordings vary it by class (a hand-played
+    # bar here: kick median 18 ticks, snare 46, hat 94). One step for every hit chokes long sounds
+    # and stretches short ones, so each class gets the length of the slice the kit cut for it.
+    durations = {cls: max(1, min(enc_max_duration, int(round(slice_ms(pads, cls) / (60_000 / bpm / STEPS_PER_BEAT)
+                                                            * TICKS_PER_STEP)))) for cls in pad_of}
     dropped = folded = before = weak = 0
     detected_total = sum(len(detected.get(cls, ())) for cls in pad_of)
     # "classify" produces one stream of onsets, so a retrigger is a retrigger whatever class it
@@ -290,13 +305,19 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
         if not 0 <= nearest < total_steps:
             folded += 1
         rows[cls][nearest % total_steps] = "x"
+        tick = int(round(steps * TICKS_PER_STEP)) % (total_steps * TICKS_PER_STEP)
+        events.append({"pad": pad_of[cls], "tick": tick, "duration": durations[cls]})
         hits[cls] += 1
         errors.append(abs(error) * 1000)
 
     pattern = {"group": group, "index": index, "bars": bars,
                "steps": {str(pad_of[cls]): "".join(row) for cls, row in rows.items()}}
+    # Same hits, placed at the tick each onset actually fell on: generate_ppak takes either.
+    tick_pattern = {"group": group, "index": index, "bars": bars,
+                    "events": sorted(events, key=lambda e: (e["tick"], e["pad"]))}
     record: dict[str, Any] = {
         "clip": analysis["clip"], "kit": kit_record["kit"], "pattern": pattern,
+        "tick_pattern": tick_pattern,
         "pads": [{"pad": pad_of[cls], "class": cls, "hits": hits[cls]} for cls in pad_of],
         "bpm": bpm, "downbeat_s": round(origin_s, 4), "bars": bars, "clip_bars": round(clip_bars, 2),
         "steps_per_bar": STEPS_PER_BAR, "ticks_per_step": TICKS_PER_STEP,

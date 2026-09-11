@@ -176,3 +176,25 @@ def test_bands_hears_a_kick_under_a_hat(fixture):
 def test_bad_detector(fixture):
     with pytest.raises(InvalidReference):
         groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, detector='spectral', **FALLBACK)
+
+
+def test_tick_pattern_keeps_micro_timing(fixture):
+    """The device stores 24 ticks per 16th and uses them; the owner's hand-played bar sat a mean
+    of 4 ticks off the grid. The steps form snaps every hit to a step, so the record also carries
+    the hits at the tick they fell on, in the shape generate_ppak's events form takes."""
+    from ep133_mcp.protocol import patterns as enc
+
+    record = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, **FALLBACK)
+    tick = record['tick_pattern']
+    assert set(tick) == {'group', 'index', 'bars', 'events'} and tick['bars'] == record['bars']
+    assert len(tick['events']) == record['quantization']['placed']
+    limit = tick['bars'] * groove.STEPS_PER_BAR * enc.TICKS_PER_STEP
+    assert all(0 <= e['tick'] < limit and e['duration'] >= 1 for e in tick['events'])
+    assert [e['tick'] for e in tick['events']] == sorted(e['tick'] for e in tick['events'])
+    # Each class keeps a note length of its own, from the slice extract_kit cut for it.
+    by_pad = {e['pad']: e['duration'] for e in tick['events']}
+    assert len(set(by_pad.values())) > 1
+    # The events round-trip through the encoder and land on the same steps as the string form.
+    data = enc.encode_events(tick['bars'], [(e['pad'], e['tick'], e['duration']) for e in tick['events']])
+    assert enc.pattern_steps(data, strict=False) == {int(p): r for p, r in record['pattern']['steps'].items()
+                                                     if 'x' in r}

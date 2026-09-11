@@ -23,6 +23,7 @@ MAX_PATTERN_INDEX = 99
 NOTE = 60
 VELOCITY_BYTE = 100
 STEP_DURATION = TICKS_PER_STEP
+MAX_DURATION = 0xFFFF
 EVENT_TYPE_NOTE = 0
 SCENES_HEAD = 7
 SCENE_CHUNK = 6
@@ -62,6 +63,35 @@ def encode_pattern(bars: int, steps: dict[int, str]) -> bytes:
     return bytes(out)
 
 
+def encode_events(bars: int, events: list[tuple[int, int, int]]) -> bytes:
+    """4-byte header plus one note event per (pad, tick, duration), sorted by tick.
+
+    The device stores TICKS_PER_STEP ticks per 16th and its own recordings use all of them: a
+    hand-played bar on this hardware sat a mean of 4 ticks (21 ms) off the 16ths, with 3 of 77
+    events exactly on a step. Snapping a transcription to steps throws that away, so this is the
+    encoder transcription uses; encode_pattern stays for patterns written as step strings."""
+    if type(bars) is not int or not 1 <= bars <= MAX_BARS:
+        raise ValueError(f"bars must be 1..{MAX_BARS}")
+    limit = bars * STEPS_PER_BAR * TICKS_PER_STEP
+    placed: list[tuple[int, int, int]] = []
+    for item in events:
+        pad, tick, duration = item
+        if type(pad) is not int or not 1 <= pad <= 12:
+            raise ValueError(f"pad must be 1..12: {pad!r}")
+        if type(tick) is not int or not 0 <= tick < limit:
+            raise ValueError(f"tick must be 0..{limit - 1} for a {bars}-bar pattern: {tick!r}")
+        if type(duration) is not int or not 1 <= duration <= MAX_DURATION:
+            raise ValueError(f"duration must be 1..{MAX_DURATION} ticks: {duration!r}")
+        placed.append((tick, pad, duration))
+    if len(placed) > MAX_EVENTS:
+        raise ValueError(f"pattern has {len(placed)} events; the header holds at most {MAX_EVENTS}")
+    placed.sort()
+    out = bytearray([0, bars, len(placed), 0])
+    for tick, pad, duration in placed:
+        out += struct.pack("<HBBBHB", tick, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, VELOCITY_BYTE, duration, 0)
+    return bytes(out)
+
+
 def decode_pattern(data: bytes) -> dict:
     """{bars, events: [{pos, pad, type, note, byte4, duration, byte7}]} for any device pattern file."""
     if len(data) < PATTERN_HEADER or (len(data) - PATTERN_HEADER) % EVENT_SIZE:
@@ -77,19 +107,31 @@ def decode_pattern(data: bytes) -> dict:
     return {"bars": bars, "events": events}
 
 
-def pattern_steps(data: bytes) -> dict[int, str]:
-    """x/. rows per pad from a note-only pattern on the 16th grid; off-grid or non-note events raise."""
+def pattern_steps(data: bytes, strict: bool = True) -> dict[int, str]:
+    """x/. rows per pad on the 16th grid.
+
+    strict (the default) raises on an event that is not on a step, which is what a pattern this
+    code wrote must look like. Patterns the device recorded are almost never on the grid - the
+    owner's hand-played bar had 3 of 77 events on a step - so pass strict=False to read one as
+    rows, rounding each event to its nearest step. Rounding loses the micro-timing: use
+    pattern_events when it matters."""
     decoded = decode_pattern(data)
     length = decoded["bars"] * STEPS_PER_BAR
     rows = {}
     for e in decoded["events"]:
         if e["type"] != EVENT_TYPE_NOTE:
             raise ValueError("pattern holds parameter events")
-        if e["pos"] % TICKS_PER_STEP or e["pos"] >= length * TICKS_PER_STEP:
+        if strict and (e["pos"] % TICKS_PER_STEP or e["pos"] >= length * TICKS_PER_STEP):
             raise ValueError(f"event at tick {e['pos']} is off the 16th grid")
         row = rows.setdefault(e["pad"], [REST] * length)
-        row[e["pos"] // TICKS_PER_STEP] = HIT
+        row[min(length - 1, round(e["pos"] / TICKS_PER_STEP))] = HIT
     return {pad: "".join(row) for pad, row in rows.items()}
+
+
+def pattern_events(data: bytes) -> list[dict]:
+    """Note events as {pad, tick, duration}, keeping the tick the device stored."""
+    return [{"pad": e["pad"], "tick": e["pos"], "duration": e["duration"]}
+            for e in decode_pattern(data)["events"] if e["type"] == EVENT_TYPE_NOTE]
 
 
 def scene_chunk_offset(scene: int) -> int:
