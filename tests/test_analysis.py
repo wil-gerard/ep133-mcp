@@ -74,6 +74,13 @@ def test_cache_and_force(truth):
     cache, _ = analysis.analysis_paths(truth['clip'])
     assert json.loads(cache.read_text())['bpm'] == first['bpm']
     assert analysis.analyze_reference(truth['clip'])['status'] == 'cached'
+    assert analysis.analyze_reference(truth['clip'], separation='hpss', beat_tracker='librosa')['status'] == 'cached'
+    # A cached record made with another method does not satisfy an explicit request.
+    record = json.loads(cache.read_text())
+    record['beat_tracker'] = {'method': 'beat_this', 'checkpoint': 'final0'}
+    cache.write_text(json.dumps(record))
+    assert analysis.analyze_reference(truth['clip'], beat_tracker='auto')['status'] == 'cached'
+    assert analysis.analyze_reference(truth['clip'], separation='hpss', beat_tracker='librosa')['status'] == 'analyzed'
     Path(first['stems']['drums']['path']).unlink()
     again = analysis.analyze_reference(truth['clip'], separation='hpss', beat_tracker='librosa')
     assert again['status'] == 'analyzed'

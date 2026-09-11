@@ -20,6 +20,7 @@ from mcp.server.mcpserver import MCPServer
 from . import __version__
 from .audio import deps as audio_deps
 from .audio.analysis import analyze_reference as _analyze_reference
+from .audio.groove import transcribe_groove as _transcribe_groove
 from .audio.kit import extract_kit as _extract_kit
 from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
@@ -265,6 +266,30 @@ def extract_kit(clip: str, want: list[str] | None = None, separation: str = "aut
         return _extract_kit(clip, want, separation, beat_tracker)
     except DeviceError as e:
         log.warning("extract_kit failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="transcribe_groove",
+    description=(
+        "Transcribe the drums of an analyzed clip as x/. strings per kit pad, in the "
+        "pattern shape generate_ppak takes (16 steps of 24 ticks per bar). Each drum "
+        "onset goes to the nearest kick/snare/hat pad of the kit from extract_kit; perc, "
+        "bass and melodic pads are not transcribed. The grid follows the tracked beats "
+        "from the analyzed downbeat; pass downbeat_s to correct the phase when the groove "
+        "comes out rotated by a beat (likely with the librosa fallback). bars is 1, 2 or 4, "
+        "fitted to the clip unless given; onsets outside the bars fold back. Reports the "
+        "quantization error in ms. Every hit is probable. Writes kit/groove.json. No "
+        "device I/O. Needs the audio extra."
+    ),
+)
+def transcribe_groove(clip: str, kit: str | None = None, bars: int | None = None, group: str = "A",
+                      index: int = 1, downbeat_s: float | None = None, separation: str = "auto",
+                      beat_tracker: str = "auto") -> dict[str, Any]:
+    try:
+        return _transcribe_groove(clip, kit, bars, group, index, downbeat_s, separation, beat_tracker)
+    except DeviceError as e:
+        log.warning("transcribe_groove failed: %s", e)
         return _error(e)
 
 

@@ -30,7 +30,7 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "install_sample", "install_kit", "undo_last_install", "fetch_reference",
-                     "analyze_reference", "extract_kit"}
+                     "analyze_reference", "extract_kit", "transcribe_groove"}
 
 
 @pytest.mark.asyncio
@@ -64,6 +64,7 @@ def test_fetch_reference_without_audio_extra_is_structured(tmp_path, monkeypatch
     assert analyzed["error"] == "AudioToolsUnavailable"
     assert deps.EXTRA_INSTALL in analyzed["next_step"]
     assert module.extract_kit(str(wav))["error"] == "AudioToolsUnavailable"
+    assert module.transcribe_groove(str(wav))["error"] == "AudioToolsUnavailable"
     assert module.server_status()["audio"]["extra_installed"] is False
 
 
@@ -98,6 +99,9 @@ async def test_analyze_reference_through_client(tmp_path):
             extracted = _payload(await session.call_tool("extract_kit", {**args, "want": ["kick", "snare", "hat"]}))
             assert [s["class"] for s in extracted["slices"]] == ["kick", "snare", "hat"]
             assert extracted["install_mapping"][0] == {"pad": 1, "path": extracted["slices"][0]["path"]}
+            groove = _payload(await session.call_tool("transcribe_groove", {**args, "downbeat_s": 0.0}))
+            assert groove["pattern"]["steps"]["1"].startswith("x.......")
+            assert set(groove["pattern"]["steps"]) == {"1", "2", "3"} and groove["quantization"]["mean_ms"] < 20
 
 
 def test_device_info_unavailable_is_structured(monkeypatch):

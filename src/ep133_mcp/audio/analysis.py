@@ -16,7 +16,9 @@ correlation on mean CQT chroma of the harmonic content. All of these are
 marked probable; the agent should say so.
 
 Results are cached as analysis.json next to the clip, stems as stems/*.wav
-(mono, clip rate) so extract_kit can cut from them.
+(mono, clip rate) so extract_kit can cut from them. The cache is reused
+unless force is set or a specific separation/beat_tracker was asked for and
+the cached record used another.
 """
 
 from __future__ import annotations
@@ -277,7 +279,9 @@ def analyze_reference(clip: str | Path, separation: str = "auto", beat_tracker: 
     if not force and cache.is_file():
         try:
             record = json.loads(cache.read_text())
-            if all(Path(s["path"]).is_file() for s in record["stems"].values() if s):
+            wanted = ((separation in ("auto", record["separation"]["method"]))
+                      and (beat_tracker in ("auto", record["beat_tracker"]["method"])))
+            if wanted and all(Path(s["path"]).is_file() for s in record["stems"].values() if s):
                 return {**record, "status": "cached"}
         except (OSError, ValueError, KeyError, TypeError):
             pass
