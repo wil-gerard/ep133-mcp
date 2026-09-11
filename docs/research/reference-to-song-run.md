@@ -182,3 +182,44 @@ chunk — is accepted by Sample Tool, stored byte-for-byte, and plays.**
 - Deleting from the agent side is deferred to Dex `mzgyw615` (`delete_samples`:
   FILE_DELETE `06 02 <fid>` is documented upstream but unverified here; a
   slot-15 proof comes first).
+
+## Step 2 — the reference: done (offline)
+
+- Owner's pick: `https://www.youtube.com/watch?v=Blgk9KCLkKk` ("Mr. James
+  Barth & A.D. – Above The Skyline"), 0–30 s. `fetch_reference` → 44.1 kHz
+  stereo clip, cache `~/.local/state/ep133-mcp/references/9a6267822f49412d/`.
+- `analyze_reference` (`separation.method: demucs/htdemucs`,
+  `beat_tracker.method: beat_this/final0`): **122.95 BPM**, downbeat 0.44 s,
+  4/4, A# minor at confidence 0.29 — all **probable**. Downbeats regular
+  every ~1.95 s to 25.8 s, then irregular in the last 4 s.
+- `extract_kit`: 12/12 pads filled, `unfilled: []`, `required_pcm_bytes`
+  237,288 (2.53 s at 46875 Hz). Drum clusters kick 42 / snare 66 / hat 51
+  onsets. Bass slices carry +24 to +56 dB of gain (bass stem −46.8 dBFS);
+  melodic +16 to +31 dB. Owner auditioned all 12 via `afplay` and approved.
+
+## Step 3 — install the kit: PARTIAL, device timeout on pad 10
+
+- Preconditions: `device_info` → `active_project: 5` (owner had switched off
+  P03), `sample_free_bytes` 27,637,368; `verify_backup(session-05)` →
+  `current`.
+- `install_kit(mapping=<extract_kit.install_mapping>, project=3, group="D",
+  backup_id=f0bf2a3e…)` → `needs_confirmation`: 12 entries, slots 11, 18,
+  21–25, 27–30, 32; one destructive entry (D9: prior slot 505 / 18750, live).
+  Checked before approval: no P03 pattern except our `d11` hits D pad 9, and
+  slot 505 stays in the library (P02 D1, P05 B1, P05 D1 store it). Owner
+  approved; the call was repeated with `confirm`.
+- The confirmed call ran for minutes with no progress output; the owner
+  interrupted the MCP client twice, but **the server kept working** — the
+  interrupt only detaches the client. Journal
+  `~/.local/state/ep133-mcp/journal/27753ad8d6d249efb4911c5a4fef3d40.json`,
+  status **`partial`**: pads 1–9 `installed` (slots 11, 18, 21, 22, 23, 24,
+  25, 27, 28 with CRCs), pad 10 **failed** with `DeviceTimeout: no response
+  to command 0x05 (request 964)` during the slot-29 upload, pads 11–12
+  `pending`. Afterwards `server_status` reports `session_open: true` and
+  `device_info` hangs: the device is not answering MIDI (**verified** from
+  the journal and the hang; cause **guessed** — device-side stall mid
+  transfer).
+- Lessons for the tool: `install_kit` needs progress reporting or a per-pad
+  call shape; a 12-sample kit is minutes of silent SysEx and the owner cannot
+  tell a stall from work. Interrupting the client must be documented as
+  harmless-but-blind.
