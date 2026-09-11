@@ -112,6 +112,7 @@ at once. Do not ask for a second one.
 
 ## The one owner session — Dex `rwe8pqs8`
 
+Start-here page for the session agent: [`hardware-run-handoff.md`](hardware-run-handoff.md).
 Command list with real paths, prepared 2026-09-11:
 [`owner-session.md`](owner-session.md). Queue items 1–6 above are done
 (`f53c017`, `8078f2a`, `04ace53`, `f621665`, `e5e46a6`, `b9a47ea`); the
