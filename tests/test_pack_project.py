@@ -11,6 +11,7 @@ import json
 import struct
 import sys
 import tarfile
+import wave
 import zipfile
 from pathlib import Path
 
@@ -179,3 +180,37 @@ def test_diff_projects_tool(tmp_path, capsys):
     assert "P06: removed" in out and "P07: added" in out
     assert diff_projects.main([str(tmp_path / "old.pak"), str(tmp_path / "new.pak"), "--project", "6"]) == 1
     assert "P05" not in capsys.readouterr().out
+
+
+def test_export_library_tool(tmp_path, capsys):
+    import export_library
+
+    files = minimal_project(pad7_slot=16)
+    other = minimal_project(pad7_slot=99)                          # stale: slot 99 is not in the library
+    wav = io.BytesIO()
+    with wave.open(wav, "wb") as w:
+        w.setnchannels(1), w.setsampwidth(2), w.setframerate(46875), w.writeframes(bytes(200))
+    source = tmp_path / "backup.pak"
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("/meta.json", json.dumps({"device_version": "2.5.1", "pak_type": "user"}))
+        z.writestr("/projects/P05.tar", P.pack_project(files))
+        z.writestr("/projects/P06.tar", P.pack_project(other))
+        z.writestr("/sounds/016 tone.wav", wav.getvalue())
+        z.writestr("/sounds/017 unused.wav", b"RIFF")
+    out = tmp_path / "library"
+    assert export_library.main([str(source), "--out", str(out)]) == 0
+    text = capsys.readouterr().out
+    assert "2 slots" in text and "wrote 2" in text and "unused  17          4  017 unused.wav" in text
+    assert "stale references (stored slots that do not exist): 1" in text
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert (out / "016 tone.wav").read_bytes() == wav.getvalue() and (out / "017 unused.wav").read_bytes() == b"RIFF"
+    assert manifest["slots"]["16"]["used"] and manifest["slots"]["16"]["wav"]["frames"] == 100
+    assert manifest["slots"]["16"]["referenced_by"] == [{"project": 5, "group": "A", "pad": 7, "stored_length": 37500}]
+    assert not manifest["slots"]["17"]["used"] and manifest["slots"]["17"]["wav"] is None
+    assert manifest["stale_references"] == {"99": [{"project": 6, "group": "A", "pad": 7, "stored_length": 37500}]}
+
+    assert export_library.main([str(source), "--out", str(out)]) == 0    # idempotent
+    assert "already present 2" in capsys.readouterr().out
+    (out / "017 unused.wav").write_bytes(b"changed")
+    assert export_library.main([str(source), "--out", str(out)]) == 1
+    assert (out / "017 unused.wav").read_bytes() == b"changed"
