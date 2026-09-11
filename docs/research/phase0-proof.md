@@ -49,17 +49,35 @@ this device, so the condition is common, not exotic. The preflight in Phase 1
 must report which projects and pads a candidate slot would affect, and treat a
 slot with live references as requiring explicit confirmation.
 
-## Finding: writing the project root `active` field does not switch projects
+## Finding: the project root `active` field switches projects at boot, not live
 
 `FILE_METADATA_SET` of `{"active":8000}` on the project root returns status 0 and
-the field reads back as 8000, but **the device stayed on project 5** — confirmed
-by the owner looking at the hardware. Reverted to 7000 immediately.
+reads back, but the device **does not switch while running** — verified by
+looking at the hardware, which stayed on project 5.
 
-So `active` reports state rather than commanding it, at least while running. Do
-not treat a successful metadata write as evidence that the device did anything.
-Reading `active` to learn the current project (as
-[device-baseline.md](device-baseline.md) does) remains valid; writing it is not a
-project-switch mechanism, and we do not have one.
+After a full power cycle, the device **booted into project 6**. So `active` is a
+boot-time project selector. This is the project-switch mechanism; it just costs a
+reboot.
+
+The field is also maintained by the device: after the owner changed the project
+by hand to project 4, `active` read 6000 without us writing anything.
+
+That independently re-confirms the project addressing from a third direction:
+`base = 2000 + N × 1000`, so 6000 is project 4, 7000 is project 5, 8000 is
+project 6. This agrees with the 432-pad comparison, where `P05.tar` matched base
+7000.
+
+Two practical consequences:
+
+- A successful metadata write is not evidence that the device acted on it. Some
+  fields are latched at boot. Read-back confirms storage, not effect.
+- Because the device writes `active` itself, the project root is not a
+  device-read-only surface. Anything we build must expect the device to change
+  state underneath us while a session is open.
+
+An earlier revision of this document claimed writing `active` does not switch
+projects at all. That was wrong — it was written before the power-cycle test,
+from the live-write result alone.
 
 ## Unresolved: node 7204 drifted back after a verified restore
 
