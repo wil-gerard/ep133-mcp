@@ -184,3 +184,26 @@ def test_memory_and_state_rechecked_before_writes(setup, monkeypatch):
     monkeypatch.setattr(installer.journal, 'create', mutate)
     result = installer.install(mapping, 1, 'A', 'backup', d)
     assert result['status'] == 'partial' and d.writes == []
+
+
+def test_change_during_upload_stops_assignment(setup, monkeypatch):
+    d, installer, mapping = setup
+    original = d.upload_sample
+    def mutate(*args):
+        original(*args)
+        d.pads[1, 'A', 1] = (16, 30)
+    monkeypatch.setattr(d, 'upload_sample', mutate)
+    result = installer.install(mapping, 1, 'A', 'backup', d)
+    assert result['entries'][0]['status'] == 'upload_attempted'
+    assert d.writes == [('upload', 1)]
+
+
+def test_expired_confirmation_reissues_without_writing(setup):
+    d, installer, mapping = setup
+    d.pads[1, 'A', 1] = (16, 30)
+    first = installer.install(mapping, 1, 'A', 'backup', d)
+    binding, _ = installer._confirmations[first['confirm']]
+    installer._confirmations[first['confirm']] = (binding, 0)
+    second = installer.install(mapping, 1, 'A', 'backup', d, first['confirm'])
+    assert second['status'] == 'needs_confirmation'
+    assert second['confirm'] != first['confirm'] and d.writes == []

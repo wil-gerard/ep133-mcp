@@ -18,7 +18,12 @@ def device_id(live):
 
 
 def pad_record(device, project, group, pad):
-    for record in stored_pads(device.project_tar(project)):
+    try:
+        records = stored_pads(device.project_tar(project))
+    except (ValueError, tarfile.TarError) as e:
+        raise VerificationFailed('Invalid stored project records', observed=str(e),
+                                 next_step='Inspect the device and journal before retrying.') from e
+    for record in records:
         if record['group'] == group and record['pad'] == pad:
             return record['stored_slot'], record['stored_length']
     raise VerificationFailed('Stored pad record missing', next_step='Reconnect and inspect the project.')
@@ -91,6 +96,12 @@ class Installer:
                     raise VerificationFailed('Uploaded sample CRC or frame count differs',
                                              observed=meta, expected={'crc': sample.crc, 'sample.end': sample.frames},
                                              next_step='Inspect the orphaned slot; no pad was assigned.')
+                after_upload = snapshot(device)
+                expected_slots = live['slots'] | {item['slot']}
+                if (after_upload['slots'] != expected_slots or after_upload['pads'] != live['pads']
+                        or any(after_upload[k] != live[k] for k in ('sku', 'os_version', 'serial'))):
+                    raise VerificationFailed('Device changed during upload; sample left unassigned',
+                                             next_step='Inspect the orphaned slot and verify a fresh backup.')
                 entry['status'] = 'assignment_attempted'
                 self.journal.save(record)
                 device.assign_pad(item['node'], item['slot'])
