@@ -223,3 +223,28 @@ chunk — is accepted by Sample Tool, stored byte-for-byte, and plays.**
   call shape; a 12-sample kit is minutes of silent SysEx and the owner cannot
   tell a stall from work. Interrupting the client must be documented as
   harmless-but-blind.
+
+## Step 3 (continued) — 9-pad kit persists and CRC-matches
+
+Decision after the timeout: **keep the 9 installed pads, do not install
+10–12 now.** `undo_last_install` reverts only the latest journal
+([install.py:136](../../src/ep133_mcp/safety/install.py)); a second install
+would orphan this journal and break the step-5 undo gate. Step 4 sequences
+only kick/snare/hat, so the melodic pads are not needed for the run. They can
+be installed after step 5.
+
+- After the owner power-cycled, `list_pads(project=3)` shows D1–D9 with the
+  installed slots (11, 18, 21, 22, 23, 24, 25, 27, 28) and their frame counts;
+  D10–D12 remain stale references (**verified**: survives reboot).
+- Server stopped (its lock released), `tools/verify_installed_journal.py` →
+  `status: matched`, journal `27753ad8…`: all 9 entries `expected_crc ==
+  actual_crc` and `stored_slot`/`stored_length` equal to the journal. **The
+  installed PCM is byte-correct on the device after a full power cycle**
+  (**verified** — this is the Dex `8zru1ujl` hardware evidence, resting on
+  `session-05.pak`).
+- `verify_backup(session-05)` before the reboot reported `stale` with exactly
+  the 9 new library slots and the 9 D pad records changed, backup vs device —
+  the expected drift after an install, not a fault.
+- Note on the interrupt: killing/stopping the MCP client does not stop the
+  server or the in-flight upload. The confirmed install kept running to its
+  timeout after the owner interrupted; the journal is the source of truth.
