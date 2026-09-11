@@ -30,7 +30,7 @@ def fake_device():
     return SimpleNamespace(
         greet=Mock(return_value=SimpleNamespace(sku='TE032AS001', os_version='2.5.1',
                                                 product='EP-133', serial='test')),
-        begin_read=Mock(), slot_exists=Mock(side_effect=lambda slot: slot == 16),
+        begin_read=Mock(), metadata=Mock(return_value={}), slot_exists=Mock(side_effect=lambda slot: slot == 16),
         project_tar=Mock(return_value=archive()))
 
 
@@ -43,7 +43,7 @@ def test_current_backup_revalidated_before_use(tmp_path):
     assert 'serial' not in result
     registry.require_current(result['backup_id'], device)
     assert device.project_tar.call_count == 18
-    assert device.slot_exists.call_count == 2000
+    assert device.slot_exists.call_count == 1998
     device.slot_exists.side_effect = lambda slot: slot in (16, 17)
     with pytest.raises(BackupStale):
         registry.require_current(result['backup_id'], device)
@@ -130,3 +130,13 @@ def test_invalid_audio_cannot_authorize_writes(tmp_path):
 def test_age_configuration_must_be_finite_positive(age):
     with pytest.raises(ValueError):
         BackupRegistry(age)
+
+
+def test_empty_slot_zero_is_not_library_audio(tmp_path):
+    path, device = make_backup(tmp_path), fake_device()
+    device.slot_exists.side_effect = lambda slot: slot in (0, 16)
+    registry = BackupRegistry()
+    assert registry.verify(path, device)['status'] == 'current'
+    device.metadata.return_value = {'name': 'unexpected audio', 'crc': 12}
+    with pytest.raises(InvalidBackup, match='sentinel'):
+        registry.verify(path, device)

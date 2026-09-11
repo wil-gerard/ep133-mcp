@@ -61,6 +61,8 @@ class FakeDevice:
         self.free -= len(pcm)
 
     def metadata(self, slot):
+        if slot == 0:
+            return {}
         return self.samples[slot] | ({'crc': -1} if self.bad_crc else {})
 
     def assign_pad(self, node, slot):

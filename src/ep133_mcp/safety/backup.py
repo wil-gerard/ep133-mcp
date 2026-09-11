@@ -20,7 +20,7 @@ from .errors import BackupStale, InvalidBackup
 # Generous bounds above the device's 64 MB library, still bounded before inflate.
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_PROJECT_BYTES = 2 * 1024 * 1024
-LIBRARY_SLOTS = range(1000)  # sample root is node 1000
+LIBRARY_SLOTS = range(1, 1000)  # 0 is the empty-assignment sentinel; root is 1000
 
 
 @dataclass
@@ -97,6 +97,11 @@ def snapshot(device) -> dict:
         raise InvalidBackup('Device identity is incomplete',
                             next_step='Reconnect and retry device_info before verification.')
     device.begin_read()
+    sentinel = device.metadata(0)
+    if sentinel != {}:
+        raise InvalidBackup('Slot zero did not match the observed empty sentinel',
+                            observed=sentinel, expected={},
+                            next_step='Inspect slot zero before verifying this firmware.')
     slots = {slot for slot in LIBRARY_SLOTS if device.slot_exists(slot)}
     pads = {}
     try:

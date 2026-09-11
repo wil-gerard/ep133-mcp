@@ -30,10 +30,12 @@ protocol implementation; they do **not** certify the new install orchestrator.
 See [phase0-proof.md](phase0-proof.md), [upload-capture.md](upload-capture.md),
 and [project-tar-read.md](project-tar-read.md).
 
-## Required before release — unverified
+## Minimum smoke test to begin Phase 2 — in progress
 
-Owner attendance and one MIDI owner are required. No new hardware writes were
-performed during this implementation session.
+Owner attendance and one MIDI owner are required. The owner approved proceeding
+with the minimum single-sample smoke test on 2026-09-10. Full kit/recovery
+acceptance remains a release gate; it no longer blocks offline Phase 2 work.
+The build stays experimental. Hardware results are recorded separately below.
 
 1. Stop the server, save a new full Sample Tool backup, close Sample Tool, and
    start this build. Leave the device untouched during all server operations.
@@ -48,15 +50,18 @@ performed during this implementation session.
    stopped to compare slot CRC/frame count and stored pad fields to the journal.
    Then restart the server. The owner
    should trigger the intended physical pad and confirm audible playback.
-5. Exercise `undo_last_install`, comparing prior stored slot and length and
+## Deferred until release
+
+1. Exercise `undo_last_install`, comparing prior stored slot and length and
    reporting library slots left in place. If the prior record contained a
    stale id, an explicit incomplete-undo result is expected; do not claim it
    restored that record. Make and verify a new full backup afterward.
-6. With owner-reviewed destinations and a fresh backup, exercise a small kit.
-   Evaluate partial recovery under an owner-approved interruption; record
-   which writes landed and which remain uncertain. Do not unplug or power off
-   during a transfer without the owner's explicit agreement.
-7. Record evidence, resolve failures, then complete Dex tasks `rbv6zfrx`,
+2. With owner-reviewed destinations and a fresh backup, exercise a small kit.
+   Review the already-tested simulated partial recovery. A deliberate hardware
+   interruption is not required for the minimum smoke test or to begin Phase 2;
+   only attempt one if an unresolved release concern warrants it and the owner
+   explicitly approves it.
+3. Record evidence, resolve failures, then complete Dex tasks `rbv6zfrx`,
    `8zru1ujl` and `fseydiaq`. Publication is separate from release preparation.
 
 ## Practical limits
