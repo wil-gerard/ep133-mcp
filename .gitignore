@@ -17,3 +17,6 @@ tools/assign_test_state.json
 __pycache__/
 *.egg-info/
 .pytest_cache/
+
+# Local release artifacts.
+dist/

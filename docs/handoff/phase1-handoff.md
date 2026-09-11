@@ -17,7 +17,7 @@ this page tells you where, what is proven, and what will hurt you.
 | Backups | `~/Documents/ep133-backups/` — two `.pak` files with `.sha256` sidecars. **Read-only. Never commit.** |
 | Test asset | `fixtures/phase0-test-tone.wav` — synthesised, no third-party rights |
 
-Run: `uv sync --extra dev && uv run pytest -q` → 231 pass, with or without the device.
+Run: `uv sync --extra dev && uv run pytest -q` → 281 pass, with or without the device.
 Server: `uv run ep133-mcp` (stdio; logs on stderr).
 
 ## State of the plan
@@ -31,10 +31,10 @@ Phase 1 (`zmwcu8kp`):
 |---|---|
 | `4iq2m1k7` package + contracts | done |
 | `eya5iivi` device_info + list_pads | **done — device_info and list_pads hardware verified** |
-| `zjnizqio` backups + restore | ready — contracts already decided, see below |
-| `fazlbs50` preflight | ready |
-| `rbv6zfrx` install_sample | blocked on both |
-| `8zru1ujl` install_kit, `fseydiaq` release | later |
+| `zjnizqio` backups + restore guidance | done — backup gate and guidance implemented |
+| `fazlbs50` preflight | done — WAV, aggregate memory, destination and safe slots |
+| `rbv6zfrx` install_sample | implemented and offline tested; hardware/power-cycle acceptance remains |
+| `8zru1ujl` install_kit, `fseydiaq` release | implementation, client tests and local builds ready; hardware acceptance remains |
 
 A **separate agent** is working `pblk0v4j` (pattern encoding, Phase 2) offline
 in `.claude/worktrees/pattern-encoding`, branch `research/pattern-encoding`.
@@ -95,13 +95,22 @@ There are 170 nonzero stored references absent from the backup library, 63 with
 nonzero length. `stale_reference` includes zero-length records; slot 0 is not
 flagged. No delete or cleanup was attempted.
 
-## Next step: backup verification and preflight
+## Next step: owner-attended hardware acceptance
 
-`zjnizqio` and `fazlbs50` are now unblocked. Follow the existing contracts:
-`verify_backup` compares stored records and library occupancy; it does not
-claim to restore. The backups remain private, read-only files on this machine.
-The task title mentioning confirmed restore is historical; the design explicitly
-excludes a restore tool.
+All eight MCP tools are implemented. `safety/` owns backup verification,
+preflight, confirmation, durable journalling, install and guarded undo.
+The full suite has 281 passing offline tests, including real MCP client
+round trips with a fake device. Local wheel/source builds succeed.
+
+Follow [phase1-validation.md](../research/phase1-validation.md) for the
+remaining acceptance run. The new orchestrator has not touched hardware;
+Phase 0 evidence must not be relabelled as proof of this implementation.
+`rbv6zfrx`, `8zru1ujl` and `fseydiaq` remain open for that reason.
+
+Backups remain private and read-only. A new Sample Tool backup is required
+before the hardware run. The default maximum age is 24 hours. Undo leaves
+uploaded library slots in place and reports stale prior fields it cannot
+faithfully restore; it does not claim full restoration.
 
 ## Device state right now
 

@@ -207,3 +207,21 @@ def test_expired_confirmation_reissues_without_writing(setup):
     second = installer.install(mapping, 1, 'A', 'backup', d, first['confirm'])
     assert second['status'] == 'needs_confirmation'
     assert second['confirm'] != first['confirm'] and d.writes == []
+
+
+def test_read_only_acceptance_helper_checks_journal(setup):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location('verify_installed_journal',
+        Path(__file__).parents[1] / 'tools/verify_installed_journal.py')
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    d, installer, mapping = setup
+    assert helper.verify(d, installer.journal)['status'] == 'failed'
+    installer.install(mapping, 1, 'A', 'backup', d)
+    before = list(d.writes)
+    result = helper.verify(d, installer.journal)
+    assert result['status'] == 'matched' and 'serial' not in result
+    assert d.writes == before
+    d.bad_crc = True
+    assert helper.verify(d, installer.journal)['status'] == 'failed'
