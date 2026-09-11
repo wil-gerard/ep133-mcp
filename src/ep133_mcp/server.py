@@ -24,6 +24,7 @@ from .audio.groove import transcribe_groove as _transcribe_groove
 from .audio.kit import extract_kit as _extract_kit
 from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
+from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.install import Installer
 from .safety.journal import Journal
@@ -290,6 +291,47 @@ def transcribe_groove(clip: str, kit: str | None = None, bars: int | None = None
         return _transcribe_groove(clip, kit, bars, group, index, downbeat_s, separation, beat_tracker)
     except DeviceError as e:
         log.warning("transcribe_groove failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="generate_ppak",
+    description=(
+        "Write a .ppak that patches an existing project for import with Sample Tool. The "
+        "template is project N as the device wrote it: from template_pak (a .pak/.ppak "
+        "path) or, when omitted, read live from the device (read-only). Only proven fields "
+        "change: bpm (settings), pads [{group, pad, slot, frames}] from install_kit results, "
+        "patterns [{group, index 1..99, bars, steps: {pad: 'x...'}}] on a 16th grid of 24 "
+        "ticks (whole pattern files are replaced), and scenes [{scene, A, B, C, D}] with a "
+        "pattern index 1..99 per group (1 for a silent group). 'o' encodes like 'x' until "
+        "velocity is proven. Unknown fields are rejected; song mode is unsupported. Returns "
+        "a manifest of every byte range that differs from the template and the decoded "
+        "patterns. Whether the device accepts the file is unverified until the import "
+        "ladder passes; import only into a non-active project after a fresh backup. Never "
+        "overwrites out."
+    ),
+)
+def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: float | None = None,
+                  pads: list[dict[str, Any]] | None = None, patterns: list[dict[str, Any]] | None = None,
+                  scenes: list[dict[str, Any]] | None = None, include_sounds: bool = False) -> dict[str, Any]:
+    if type(project) is not int or not 1 <= project <= 9:
+        return {"error": "InvalidProject", "message": "project must be 1..9"}
+    try:
+        if template_pak is not None:
+            template, meta, sounds = _generate.template_from_pak(template_pak, project)
+        else:
+            with _operation_lock:
+                d = _device()
+                g = d.greet()
+                template = d.project_tar(project)
+            meta = {"device_sku": g.sku, "base_sku": g.base_sku, "device_version": g.os_version}
+            sounds = {}
+        return _generate.generate_ppak(template, project, out, meta, bpm=bpm, pads=pads, patterns=patterns,
+                                       scenes=scenes, sounds=sounds if include_sounds else None)
+    except _generate.GenerateError as e:
+        return {"error": "InvalidInput", "message": str(e)}
+    except DeviceError as e:
+        log.warning("generate_ppak failed: %s", e)
         return _error(e)
 
 

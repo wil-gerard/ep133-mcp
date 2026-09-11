@@ -30,7 +30,7 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "install_sample", "install_kit", "undo_last_install", "fetch_reference",
-                     "analyze_reference", "extract_kit", "transcribe_groove"}
+                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
 
 
 @pytest.mark.asyncio
@@ -180,3 +180,20 @@ module.main()
             assert stale['error'] == 'BackupStale'
             undo = _payload(await session.call_tool('undo_last_install'))
             assert undo['status'] == 'undone' and undo['library_slots_left_in_place'] == [1, 2]
+            from ep133_mcp.protocol import projects as P
+            from test_pack_project import minimal_project
+            template = tmp_path / 'template.pak'
+            with zipfile.ZipFile(template, 'w') as z:
+                z.writestr('/meta.json', json.dumps({'device_version': '2.5.1', 'device_sku': 'TE032AS001'}))
+                z.writestr('/projects/P07.tar', P.pack_project(minimal_project()))
+            pattern = {'group': 'A', 'index': 2, 'bars': 1, 'steps': {'1': 'x...x...x...x...'}}
+            written = _payload(await session.call_tool('generate_ppak', {
+                'out': str(tmp_path / 'out.ppak'), 'project': 7, 'template_pak': str(template),
+                'bpm': 97.0, 'patterns': [pattern], 'scenes': [{'scene': 1, 'A': 2, 'B': 1, 'C': 1, 'D': 1}]}))
+            assert written['status'] == 'written' and written['verified_on_device'] is False
+            assert {m['member'] for m in written['manifest']} == {'settings', 'patterns/a02', 'scenes'}
+            assert written['patterns_written'] == {'patterns/a02': pattern['steps']}
+            live = _payload(await session.call_tool('generate_ppak', {
+                'out': str(tmp_path / 'live.ppak'), 'project': 1, 'bpm': 97.0}))
+            assert live['error'] == 'InvalidInput' and 'flavour' in live['message']   # fake device writes ustar
+            assert not (tmp_path / 'live.ppak').exists()

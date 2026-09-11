@@ -31,7 +31,7 @@ def minimal_project(pad7_slot: int = 16) -> dict[str, bytes]:
                 struct.pack_into("<H", record, 1, pad7_slot)
                 struct.pack_into("<I", record, 8, 37500)
             files[f"pads/{group}/p{pad:02}"] = bytes(record)
-    files["patterns/a01"] = bytes([0, 1, 1, 0]) + struct.pack("<HBBBHB", 0, 7, 60, 100, 24, 0)
+    files["patterns/a01"] = bytes([0, 1, 1, 0]) + struct.pack("<HBBBHB", 0, (7 - 1) << 3, 60, 100, 24, 0)
     files["patterns/b03"] = bytes([0, 2, 0, 0])
     return files
 

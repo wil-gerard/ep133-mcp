@@ -1,0 +1,168 @@
+"""generate_ppak: patch a device-written project and wrap it as a .ppak.
+
+A from-scratch project would have to guess event byte 7, velocity, settings
+bytes 216-221 and fx_settings byte 4. Patching sidesteps all of them: the
+template is a project TAR the device wrote (read live or taken from a
+backup), and only the fields proven in docs/research/pattern-encoding.md
+change - BPM, pad records' stored slot/length, whole pattern files, and
+scene chunks. Everything else, including fx_settings and every unexplained
+byte, is carried verbatim, and the manifest lists every byte range that
+differs from the template.
+
+Whether the device accepts the file is the import ladder's question
+(docs/handoff/pattern-encoding-next.md); this module only decides what the
+bytes are. No device I/O here: callers pass the template TAR bytes.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from . import patterns as enc
+from .projects import (build_ppak, pack_project, project_meta, read_pak, referenced_sounds, stored_pads,
+                       unpack_project)
+
+PAD_FIELDS = {"group", "pad", "slot", "frames"}
+PATTERN_FIELDS = {"group", "index", "bars", "steps"}
+SCENE_FIELDS = {"scene", "A", "B", "C", "D"}
+VELOCITY_NOTE = ("'o' steps are encoded exactly like 'x' (note 60, byte 4 = 100): the device has never "
+                 "been seen to store any other velocity, so softer hits are not expressible yet.")
+
+
+class GenerateError(ValueError):
+    """Input rejected; nothing was written."""
+
+
+def _require_fields(item, fields: set[str], what: str) -> dict:
+    if not isinstance(item, dict) or set(item) != fields:
+        raise GenerateError(f"each {what} entry needs exactly {sorted(fields)}: {item!r}")
+    return item
+
+
+def _ranges(before: bytes, after: bytes) -> list[dict]:
+    """Contiguous differing byte ranges between two equal-length members."""
+    out = []
+    start = None
+    for i in range(len(before)):
+        same = before[i] == after[i]
+        if not same and start is None:
+            start = i
+        if same and start is not None:
+            out.append({"offset": start, "length": i - start, "before": before[start:i].hex(), "after": after[start:i].hex()})
+            start = None
+    if start is not None:
+        out.append({"offset": start, "length": len(before) - start, "before": before[start:].hex(), "after": after[start:].hex()})
+    return out
+
+
+def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | None = None,
+                  patterns: list[dict] | None = None, scenes: list[dict] | None = None) -> tuple[bytes, list[dict]]:
+    """(patched TAR, manifest). Raises GenerateError for anything outside the proven fields."""
+    try:
+        files = unpack_project(template)
+        stored_pads(template)
+    except ValueError as e:
+        raise GenerateError(f"template is not a complete project TAR: {e}") from e
+    if pack_project(files) != template:
+        raise GenerateError("template TAR is not in the device's own flavour; take it from a backup or a live read")
+    original = dict(files)
+    manifest: list[dict] = []
+    try:
+        if bpm is not None:
+            if "settings" not in files:
+                raise GenerateError("template has no settings file to hold the BPM")
+            files["settings"] = enc.patch_bpm(files["settings"], bpm)
+        for item in pads or []:
+            _require_fields(item, PAD_FIELDS, "pads")
+            if item["group"] not in enc.GROUPS or type(item["pad"]) is not int or not 1 <= item["pad"] <= 12:
+                raise GenerateError(f"pad destination must be group A..D and pad 1..12: {item!r}")
+            name = f"pads/{item['group'].lower()}/p{item['pad']:02d}"
+            files[name] = enc.patch_pad_record(files[name], item["slot"], item["frames"])
+        seen = set()
+        for item in patterns or []:
+            _require_fields(item, PATTERN_FIELDS, "patterns")
+            name = enc.pattern_member(item["group"], item["index"])
+            if name in seen:
+                raise GenerateError(f"pattern {name} given twice")
+            seen.add(name)
+            steps = item["steps"]
+            if not isinstance(steps, dict) or not steps:
+                raise GenerateError(f"pattern {name} needs steps: {{pad: 'x...'}}")
+            rows = {}
+            for pad, row in steps.items():
+                key = int(pad) if isinstance(pad, str) and pad.isdigit() else pad
+                rows[key] = row
+            files[name] = enc.encode_pattern(item["bars"], rows)
+        for item in scenes or []:
+            _require_fields(item, SCENE_FIELDS, "scenes")
+            if "scenes" not in files:
+                raise GenerateError("template has no scenes file")
+            files["scenes"] = enc.patch_scene(files["scenes"], item["scene"],
+                                             {g: item[g] for g in enc.GROUPS})
+    except ValueError as e:
+        raise GenerateError(str(e)) from e
+
+    for name in sorted(set(files) | set(original)):
+        before, after = original.get(name), files.get(name)
+        if before == after:
+            continue
+        entry = {"member": name}
+        if before is None:
+            entry.update(action="added", bytes=len(after))
+        elif name.startswith("patterns/"):
+            dropped = enc.decode_pattern(before)["events"]
+            entry.update(action="replaced", bytes_before=len(before), bytes=len(after),
+                         events_dropped=len(dropped),
+                         parameter_events_dropped=sum(e["type"] != enc.EVENT_TYPE_NOTE for e in dropped))
+        else:
+            entry.update(action="patched", bytes=len(after), ranges=_ranges(before, after))
+        manifest.append(entry)
+    return pack_project(files), manifest
+
+
+def generate_ppak(template: bytes, project: int, out: str | Path, meta: dict, *, bpm: float | None = None,
+                  pads: list[dict] | None = None, patterns: list[dict] | None = None,
+                  scenes: list[dict] | None = None, sounds: dict[str, bytes] | None = None) -> dict:
+    """Patch the template, write <out>.ppak, and describe every change. meta is a backup's meta.json."""
+    out = Path(out).expanduser()
+    if out.suffix != ".ppak":
+        raise GenerateError("output path must end in .ppak")
+    if out.exists():
+        raise GenerateError(f"refusing to overwrite {out}")
+    if not any((bpm is not None, pads, patterns, scenes)):
+        raise GenerateError("nothing to change: give bpm, pads, patterns or scenes")
+    tar, manifest = patch_project(template, bpm, pads, patterns, scenes)
+    chosen = referenced_sounds(tar, sounds) if sounds else {}
+    data = build_ppak(project, tar, project_meta(meta), chosen)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    decoded = {}
+    for item in patterns or []:
+        name = enc.pattern_member(item["group"], item["index"])
+        decoded[name] = {str(pad): row for pad, row in
+                         enc.pattern_steps(unpack_project(tar)[name]).items()}
+    return {
+        "status": "written", "ppak": str(out), "bytes": len(data), "project": project,
+        "tar_bytes": len(tar), "template_bytes": len(template), "manifest": manifest,
+        "patterns_written": decoded, "sounds_included": sorted(chosen),
+        "velocity": VELOCITY_NOTE if any(
+            enc.SOFT_HIT in row for item in patterns or [] for row in item["steps"].values()) else None,
+        "instruction": (f"Import {out.name} with Sample Tool into project {project}, which must not be the active "
+                        "project. Take a full backup first. If the device rejects the file, do not power-cycle "
+                        "before writing up what happened."),
+        "verified_on_device": False,
+    }
+
+
+def template_from_pak(path: str | Path, project: int) -> tuple[bytes, dict, dict[str, bytes]]:
+    """(template TAR, meta, sounds) for one project of a .pak/.ppak on disk."""
+    path = Path(path).expanduser()
+    if not path.is_file():
+        raise GenerateError(f"template pak not found: {path}")
+    try:
+        meta, projects, sounds = read_pak(path.read_bytes())
+    except Exception as e:  # zip or json errors: the file is not a pak
+        raise GenerateError(f"template is not a readable pak: {e}") from e
+    if project not in projects:
+        raise GenerateError(f"pak holds no project P{project:02d}")
+    return projects[project], meta, sounds
