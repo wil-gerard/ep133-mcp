@@ -49,6 +49,28 @@ ALLOC = RequestIdAllocator()
 LOG = []
 
 
+def sanitize(frames, greet_payload):
+    """Strip the device serial from captured frames before they are written.
+
+    GREET answers with `...;serial:XXXXXXXX`, so every capture picks the serial
+    up unless it is removed. Replaced with an equal-length placeholder so the
+    hex framing and payload lengths stay faithful.
+    """
+    text = greet_payload.decode("utf-8", "replace")
+    marker = "serial:"
+    if marker not in text:
+        return frames
+    serial = text.split(marker, 1)[1].split(";")[0].strip("\x00").strip()
+    if not serial:
+        return frames
+    placeholder = ("REDACTED" * ((len(serial) // 8) + 1))[:len(serial)]
+    a, b = serial.encode().hex(), placeholder.encode().hex()
+    for f in frames:
+        for k in ("sent_hex", "response_hex"):
+            f[k] = f[k].replace(a, b)
+    return frames
+
+
 def read_pcm(path):
     """Read our own 46875 Hz mono 16-bit fixture. No resampling, no deps."""
     with wave.open(str(path)) as w:
@@ -172,12 +194,18 @@ def main():
             else "FILE_INFO commits; upload_sample never sends it and is broken" if committed_b
             else "neither committed - upload path not understood, do not proceed"))
 
+    greet = next((bytes.fromhex(f["response_hex"]) for f in LOG
+                  if f["label"] == "preflight/greet"), b"")
+    sanitize(LOG, greet)
+
     OUTDIR.mkdir(parents=True, exist_ok=True)
     out = OUTDIR / f"upload-capture-slot{args.slot}.json"
     out.write_text(json.dumps({
         "device": "EP-133 TE032AS001 OS 2.5.1",
         "source_wav": "fixtures/phase0-test-tone.wav (synthesised, no third-party rights)",
         "pcm_bytes": len(pcm), "chunks": len(chunks), "slot": args.slot, "name": name,
+        "_sanitization": "Device serial replaced with an equal-length placeholder in "
+                         "every frame. The audio is our own synthesised fixture.",
         "frames": LOG}, indent=1))
     print(f"\ncapture written to {out} ({len(LOG)} frames)")
 

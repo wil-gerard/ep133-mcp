@@ -924,5 +924,6 @@
    "status_text": "ok",
    "response_hex": "00013235352c2273616d706c652e7374617274223a302c2273616d706c652e656e64223a31383735307d00"
   }
- ]
+ ],
+ "_sanitization": "Device serial replaced with REDACTED in GREET responses. No other identifying data; the audio is our own synthesised fixture."
 }
