@@ -1,11 +1,17 @@
 """transcribe_groove: the drums-stem onsets as x/. strings per kit pad.
 
-Each onset on the drums stem is assigned to the nearest of the kit's kick,
-snare and hat pads by the same three features extract_kit clustered on
-(perc pads are variants the owner places by hand; bass and melodic pads are
-not transcribed). A single onset gets a single pad: when hits coincide, the
-slice extract_kit cut at that class is the coincident sound, so one pad is
-what reproduces it.
+Kick, snare and hat are detected independently, each in its own frequency
+band of the drums stem, because drums coincide: a four-on-the-floor kick
+under an offbeat hat is two sounds at one instant, and classifying a single
+onset stream into one class per onset can only keep one of them. Measured on
+a real breakbeat, the single-stream classifier found a kick on 1 of 16 beats
+that all carried one. Bands are BANDS; a mid-band onset swamped by the low
+band is the kick's body, not a snare, and is dropped (LOW_DOMINANCE). perc
+pads are variants the owner places by hand; bass and melodic pads are not
+transcribed.
+
+The kit is only read for the class -> pad numbers, so a kit extracted from a
+different section of the same track is fine.
 
 Grid: 16 steps per bar of 24 ticks, anchored on the tracked beats. Each
 onset's position is interpolated between the two beats around it (mean
@@ -45,6 +51,19 @@ TICKS_PER_STEP = 24
 BAR_CHOICES = (1, 2, 4)
 MIN_INTERVAL_STEPS = 0.6
 GROUPS = ("A", "B", "C", "D")
+DETECTORS = ("classify", "bands")
+# Detection bands per class, and the onset-picking parameters for each.
+BANDS = {"kick": (20.0, 140.0), "snare": (180.0, 2800.0), "hat": (5500.0, 16000.0)}
+# Thresholds apply to each band's onset envelope after scaling to its own peak, so they mean
+# the same thing whatever the band's absolute level is.
+ONSET_DELTA = {"kick": 0.15, "snare": 0.15, "hat": 0.15}
+ONSET_FLOOR = {"kick": 0.25, "snare": 0.15, "hat": 0.25}
+ONSET_WAIT = {"kick": 3, "snare": 3, "hat": 3}
+LOW_DOMINANCE = 0.10          # a mid-band onset with less than this share of the low band is the kick
+HIGH_DOMINANCE = 0.15         # ... and with less than this share of the high band it is the hat
+LEAD_IN_S = 0.05              # silence prepended so a hit at t=0 has a rise to detect
+N_FFT = 2048
+HOP = 256
 
 
 def groove_path(clip: str | Path) -> Path:
@@ -120,7 +139,10 @@ class BeatGrid:
 
 
 def assign_classes(drums_audio, sr: int, onsets: dict, pads: list[dict]) -> list[str]:
-    """Nearest drum pad class per onset, by z-scored centroid/flatness/low-band features."""
+    """Nearest drum pad class per onset, by z-scored centroid/flatness/low-band features.
+
+    One onset gets one class, so coincident hits keep only the loudest character; `band_onsets`
+    is the detector that can hear a kick and a hat at the same instant."""
     import numpy as np
 
     features = drum_features(drums_audio, sr, onsets["starts_s"])
@@ -131,10 +153,68 @@ def assign_classes(drums_audio, sr: int, onsets: dict, pads: list[dict]) -> list
     return [pads[int(np.argmin(np.linalg.norm(t - row, axis=1)))]["class"] for row in z]
 
 
+def band_energy(audio, sr: int, at: float, low: float, high: float, window: float = 0.045) -> float:
+    import numpy as np
+
+    begin = int(at * sr)
+    segment = audio[begin:begin + int(window * sr)]
+    if len(segment) < 8:
+        return 0.0
+    magnitude = np.abs(np.fft.rfft(segment * np.hanning(len(segment))))
+    freqs = np.fft.rfftfreq(len(segment), 1 / sr)
+    return float(np.square(magnitude[(freqs >= low) & (freqs < high)]).sum())
+
+
+def band_onsets(audio, sr: int) -> dict[str, list[tuple[float, float]]]:
+    """(time, strength 0..1) per drum class, detected in that class's own band.
+
+    Detecting per band is what lets a kick and a hat at the same instant both be heard. The
+    strength is the onset envelope at the peak, scaled by the loudest peak in that band, so
+    min_strength means the same thing for every class."""
+    import librosa
+    import numpy as np
+
+    padded = np.concatenate([np.zeros(int(LEAD_IN_S * sr), dtype=np.float32), np.asarray(audio, dtype=np.float32)])
+    spectrum = np.abs(librosa.stft(padded, n_fft=N_FFT, hop_length=HOP))
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=N_FFT)
+    out: dict[str, list[tuple[float, float]]] = {}
+    for name, (low, high) in BANDS.items():
+        rows = spectrum[(freqs >= low) & (freqs < high)]
+        if not rows.size:
+            out[name] = []
+            continue
+        envelope = librosa.onset.onset_strength(S=librosa.amplitude_to_db(rows, ref=np.max), sr=sr, hop_length=HOP)
+        envelope = envelope / (float(envelope.max()) or 1.0)
+        frames = [f for f in librosa.onset.onset_detect(onset_envelope=envelope, sr=sr, hop_length=HOP,
+                                                        backtrack=False, delta=ONSET_DELTA[name],
+                                                        wait=ONSET_WAIT[name])
+                  if envelope[f] >= ONSET_FLOOR[name]]
+        peak = 1.0
+        hits = []
+        for frame in frames:
+            at = float(librosa.frames_to_time(frame, sr=sr, hop_length=HOP)) - LEAD_IN_S
+            if at < -LEAD_IN_S:
+                continue
+            if name == "snare":
+                # The snare band overlaps both neighbours: the kick's body reaches up into it and
+                # the hat's noise reaches down. A real snare owns its band at that instant.
+                mid = band_energy(audio, sr, max(at, 0.0), *BANDS["snare"])
+                bottom = band_energy(audio, sr, max(at, 0.0), *BANDS["kick"])
+                top = band_energy(audio, sr, max(at, 0.0), *BANDS["hat"])
+                if mid < LOW_DOMINANCE * bottom or mid < HIGH_DOMINANCE * top:
+                    continue
+            hits.append((max(at, 0.0), min(1.0, float(envelope[frame]) / peak)))
+        out[name] = hits
+    return out
+
+
 def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int | None = None,
                       group: str = "A", index: int = 1, downbeat_s: float | None = None,
                       separation: str = "auto", beat_tracker: str = "auto",
-                      min_strength: float = 0.0) -> dict:
+                      min_strength: float = 0.0, detector: str = "classify") -> dict:
+    if detector not in DETECTORS:
+        raise InvalidReference(f"detector must be one of {DETECTORS}", observed=detector,
+                               next_step="'bands' detects each class in its own frequency band.")
     if not isinstance(min_strength, (int, float)) or isinstance(min_strength, bool) or not 0.0 <= min_strength <= 1.0:
         raise InvalidReference("min_strength must be a number from 0 to 1", observed=min_strength,
                                next_step="Omit it to keep every onset, or raise it to keep only accents.")
@@ -147,13 +227,6 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     kit_record = load_kit(clip, kit)
     pads = [s for s in kit_record["slices"] if s["class"] in DRUM_CLASSES]
     pad_of = {p["class"]: p["pad"] for p in pads}
-    # Exemplars are timestamps into the kit's own clip; a kit from a different clip silently
-    # collapses every onset onto whichever exemplar still lands inside this audio.
-    outside = [p["class"] for p in pads if not 0.0 <= p["source_s"][0] < float(analysis["duration_s"])]
-    if outside:
-        raise InvalidReference("Kit was extracted from a different clip", observed=outside,
-                               expected=f"exemplar times inside 0..{float(analysis['duration_s']):.2f}s",
-                               next_step="Run extract_kit on this clip and pass that kit.json.")
     drums = analysis["stems"].get("drums")
     if not drums or not drums["onsets_s"]:
         raise InvalidReference("No drum onsets to transcribe", observed=drums and drums.get("level_dbfs"),
@@ -170,24 +243,47 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     bars = bars or choose_bars(clip_bars)
     total_steps = bars * STEPS_PER_BAR
 
-    classes = assign_classes(audio, sr, drums, pads)
+    mono = audio.mean(axis=1) if audio.ndim > 1 else audio
+    if detector == "bands":
+        detected = band_onsets(mono, sr)
+    else:
+        # "classify" reads each pad's exemplar out of THIS clip at a time stored relative to the
+        # kit's own clip, so a foreign kit collapses every onset onto whichever exemplar still
+        # lands inside the audio. "bands" only needs the class -> pad numbers.
+        outside = [p["class"] for p in pads if not 0.0 <= p["source_s"][0] < float(analysis["duration_s"])]
+        if outside:
+            raise InvalidReference("Kit was extracted from a different clip", observed=outside,
+                                   expected=f"exemplar times inside 0..{float(analysis['duration_s']):.2f}s",
+                                   next_step="Run extract_kit on this clip, or pass detector='bands'.")
+        classes = assign_classes(audio, sr, drums, pads)
+        strengths = drums.get("strength") or [1.0] * len(drums["onsets_s"])
+        detected = {cls: [] for cls in pad_of}
+        for t, cls, strength in zip(drums["onsets_s"], classes, strengths):
+            detected.setdefault(cls, []).append((t, strength))
     rows = {cls: ["."] * total_steps for cls in pad_of}
     hits = {cls: 0 for cls in pad_of}
     errors: list[float] = []
     dropped = folded = before = weak = 0
-    last_step: float | None = None
-    strengths = drums.get("strength") or [1.0] * len(drums["onsets_s"])
-    for t, cls, strength in zip(drums["onsets_s"], classes, strengths):
+    detected_total = sum(len(detected.get(cls, ())) for cls in pad_of)
+    # "classify" produces one stream of onsets, so a retrigger is a retrigger whatever class it
+    # was given; "bands" produces one stream per class, where a kick and a hat at the same
+    # instant are two real hits and only a repeat within the same class is a retrigger.
+    scopes = {cls: cls for cls in pad_of} if detector == "bands" else {cls: "" for cls in pad_of}
+    last_step: dict[str, float] = {}
+    placements = sorted(((t, cls, strength) for cls in pad_of for t, strength in detected.get(cls, ())),
+                        key=lambda item: item[0])
+    for t, cls, strength in placements:
         # Every hit plays at one velocity, so ghost notes land as loud as accents; dropping the
         # quiet ones keeps the skeleton of the groove instead of a uniform wall.
         if strength < min_strength:
             weak += 1
             continue
         steps, error = grid.step(t)
-        if last_step is not None and steps - last_step < MIN_INTERVAL_STEPS:
+        scope = scopes[cls]
+        if scope in last_step and steps - last_step[scope] < MIN_INTERVAL_STEPS:
             dropped += 1
             continue
-        last_step = steps
+        last_step[scope] = steps
         nearest = round(steps)
         if nearest < 0:
             before += 1
@@ -207,7 +303,7 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
         "grid": grid.mode, "beats_per_bar_hint": analysis["downbeat"]["beats_per_bar"],
         "quantization": {"mean_ms": round(sum(errors) / len(errors), 1) if errors else None,
                          "max_ms": round(max(errors), 1) if errors else None,
-                         "onsets": len(drums["onsets_s"]), "placed": len(errors), "folded": folded,
+                         "onsets": detected_total, "detector": detector, "placed": len(errors), "folded": folded,
                          "below_min_strength": weak,
                          "dropped_retriggers": dropped, "before_downbeat": before},
         "beat_tracker": analysis["beat_tracker"], "separation": analysis["separation"], "probable": True,

@@ -146,3 +146,33 @@ def test_min_strength_drops_weak_onsets(fixture):
     for bad in (-0.1, 1.5, '0.5', True):
         with pytest.raises(InvalidReference):
             groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, min_strength=bad, **FALLBACK)
+
+
+def test_bands_hears_a_kick_under_a_hat(fixture):
+    """The fixture puts a kick and a hat on the same step; one onset can only carry one class.
+
+    On a real four-on-the-floor clip the single-stream classifier found a kick on 1 of 16 beats
+    that all carried one, because each kick coincided with a brighter hit. Detecting per band
+    is what makes both audible."""
+    bands = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, detector='bands', **FALLBACK)
+    classify = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, detector='classify', **FALLBACK)
+    assert bands['quantization']['detector'] == 'bands'
+    pad_of = {p['class']: str(p['pad']) for p in bands['pads']}
+    kick_pad, hat_pad = pad_of['kick'], pad_of['hat']
+    kick_row, hat_row = bands['pattern']['steps'][kick_pad], bands['pattern']['steps'][hat_pad]
+    # Every kick of the first bar is found, and the coincident hats are not lost to it.
+    assert kick_row[:16] == synth_reference.PATTERN['kick']
+    assert hat_row[:16] == synth_reference.PATTERN['hat']
+    coincident = [i for i in range(16)
+                  if synth_reference.PATTERN['kick'][i] == 'x' and synth_reference.PATTERN['hat'][i] == 'x']
+    assert coincident and all(kick_row[i] == 'x' and hat_row[i] == 'x' for i in coincident)
+    # The single-stream detector cannot do that: a step carries one class.
+    c_pad = {p['class']: str(p['pad']) for p in classify['pads']}
+    c_kick = classify['pattern']['steps'][c_pad['kick']]
+    c_hat = classify['pattern']['steps'][c_pad['hat']]
+    assert not all(c_kick[i] == 'x' and c_hat[i] == 'x' for i in coincident)
+
+
+def test_bad_detector(fixture):
+    with pytest.raises(InvalidReference):
+        groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, detector='spectral', **FALLBACK)
