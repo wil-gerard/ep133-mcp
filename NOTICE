@@ -1,0 +1,9 @@
+This package ports the SysEx framing, request-id allocation and 7-bit packing
+routines from ZacharySBrown/ep133-ppak, revision
+93f0f6b1f6110701e6378e2702f39fd7e9a9d687, licensed MIT. Those routines are in
+turn ports of phones24/ep133-export-to-daw (src/lib/midi/device.ts, utils.ts).
+
+Byte layouts documented there were verified against this project's own
+hardware captures before reuse; where this project's findings disagree with
+upstream documentation, docs/research/ records the evidence and docs/upstream/
+carries the reports drafted for them.

@@ -13,3 +13,7 @@ tools/assign_test_state.json
 
 # Parallel-agent worktrees live here; never part of this repo.
 .claude/worktrees/
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/

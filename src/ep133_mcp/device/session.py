@@ -1,0 +1,207 @@
+"""DeviceSession: the one owner of the EP-133 MIDI port in this process.
+
+Design rules (docs/design/tool-contracts.md):
+
+- Exactly one session per process. Opening it claims both endpoints named
+  "EP-133"; if either is missing or busy, `DeviceUnavailable` says which.
+- Nothing is cached. The device rewrites its own state while running, so every
+  method is a fresh round trip.
+- Every read starts with GREET and a read-mode FILE_INIT, mirroring the captured
+  working sequences instead of assuming mode persists across calls.
+- Metadata reads walk pages to the null terminator. Existence is decided by the
+  response status, never by whether the JSON parsed.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import queue
+import threading
+import time
+from dataclasses import dataclass
+
+from ..protocol import payloads as P
+from ..protocol.sysex import CMD_FILE, CMD_GREET, RequestIds, Response, build_frame, parse_frame
+
+log = logging.getLogger(__name__)
+
+PORT_NAME = "EP-133"
+MAX_METADATA_PAGES = 16
+
+
+class DeviceError(Exception):
+    """Base for device-side failures. Carries structured detail for the MCP layer."""
+
+    def __init__(self, message: str, **detail):
+        super().__init__(message)
+        self.detail = detail
+
+
+class DeviceUnavailable(DeviceError):
+    pass
+
+
+class DeviceTimeout(DeviceError):
+    pass
+
+
+class DeviceRejected(DeviceError):
+    """The device answered with a non-zero status."""
+
+
+@dataclass(frozen=True)
+class SampleRoot:
+    max_capacity: int
+    free_space_in_bytes: int
+    native_rate: int
+
+
+class DeviceSession:
+    def __init__(self, inter_message_delay_s: float = 0.01, timeout_s: float = 5.0):
+        self._delay = inter_message_delay_s
+        self._timeout = timeout_s
+        self._ids = RequestIds()
+        self._identity = 0
+        self._responses: queue.Queue[Response] = queue.Queue()
+        self._lock = threading.Lock()
+        self._out = None
+        self._in = None
+
+    # ---- lifecycle -------------------------------------------------------
+
+    def open(self) -> "DeviceSession":
+        import mido
+
+        outs = [n for n in mido.get_output_names() if PORT_NAME in n]
+        ins = [n for n in mido.get_input_names() if PORT_NAME in n]
+        if not outs or not ins:
+            raise DeviceUnavailable(
+                "EP-133 MIDI endpoints not found",
+                outputs=mido.get_output_names(),
+                inputs=mido.get_input_names(),
+                next_step="Connect and power the EP-133 over a data-capable USB cable, "
+                          "and close EP Sample Tool or any other program holding the port.",
+            )
+        try:
+            self._out = mido.open_output(outs[0])
+            self._in = mido.open_input(ins[0], callback=self._on_message)
+        except OSError as e:
+            raise DeviceUnavailable(
+                f"could not open EP-133 port: {e}",
+                next_step="Another process may own the port. Close it and retry.",
+            ) from e
+        log.info("opened %s / %s", outs[0], ins[0])
+        return self
+
+    def close(self) -> None:
+        for port in (self._in, self._out):
+            if port is not None:
+                port.close()
+        self._in = self._out = None
+
+    def __enter__(self):
+        return self.open()
+
+    def __exit__(self, *exc):
+        self.close()
+
+    # ---- transport -------------------------------------------------------
+
+    def _on_message(self, msg) -> None:
+        if msg.type != "sysex":
+            return
+        parsed = parse_frame(bytes([0xF0, *msg.data, 0xF7]))
+        if parsed is not None:
+            self._responses.put(parsed)
+
+    def request(self, command: int, payload: bytes) -> Response:
+        """Send one frame and block for its matching response."""
+        if self._out is None:
+            raise DeviceUnavailable("session not open")
+        with self._lock:
+            rid = self._ids.next()
+            frame = build_frame(command, payload, rid, identity=self._identity)
+            import mido
+            self._out.send(mido.Message("sysex", data=frame[1:-1]))
+            time.sleep(self._delay)
+            deadline = time.time() + self._timeout
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise DeviceTimeout(
+                        f"no response to command 0x{command:02x} (request {rid})",
+                        command=command, request_id=rid,
+                    )
+                try:
+                    r = self._responses.get(timeout=remaining)
+                except queue.Empty:
+                    continue
+                if r.request_id == rid:
+                    return r
+                log.debug("discarding unmatched response id=%s", r.request_id)
+
+    # ---- verified read operations ---------------------------------------
+
+    def greet(self) -> P.Greeting:
+        r = self.request(CMD_GREET, b"")
+        if not r.ok:
+            raise DeviceRejected("GREET rejected", status=r.status)
+        self._identity = r.identity
+        return P.Greeting.parse(r.payload)
+
+    def begin_read(self) -> None:
+        r = self.request(CMD_FILE, P.file_init(P.READ_MODE))
+        if not r.ok:
+            raise DeviceRejected("read-mode FILE_INIT rejected", status=r.status)
+
+    def metadata(self, file_id: int) -> dict | None:
+        """Metadata for a file id, or None if the device says it does not exist.
+
+        Existence comes from the status of page 0. A record that exists but does
+        not parse is returned as {"_unparsed": <bytes>} — it is still occupied.
+        """
+        body = b""
+        for page in range(MAX_METADATA_PAGES):
+            r = self.request(CMD_FILE, P.metadata_get(file_id, page))
+            if not r.ok:
+                if page == 0:
+                    return None
+                break
+            chunk = P.parse_metadata_page(r.payload)
+            if not chunk:
+                break
+            body += chunk
+            end = body.find(b"\0")
+            if end >= 0:
+                body = body[:end]
+                break
+        try:
+            return json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {"_unparsed": len(body)}
+
+    def sample_root(self) -> SampleRoot:
+        m = self.metadata(P.SAMPLE_ROOT)
+        if not m or "max_capacity" not in m:
+            raise DeviceRejected("sample root metadata unavailable", observed=m)
+        native = 0
+        for fmt in m.get("formats", []):
+            for f in fmt.get("formats", []):
+                native = f.get("samplerate.native", native)
+        return SampleRoot(int(m["max_capacity"]), int(m["free_space_in_bytes"]), int(native))
+
+    def active_project(self) -> int:
+        m = self.metadata(P.PROJECT_ROOT)
+        if not m or "active" not in m:
+            raise DeviceRejected("project root metadata unavailable", observed=m)
+        return P.project_base(int(m["active"]))
+
+    def pad_sym(self, project: int, group: str, pad_num: int) -> int:
+        """Resolved slot for a pad; 0 means the device considers it unassigned.
+
+        A stale stored slot also reads 0 here. Only a project TAR read shows
+        the stored field; that read is not implemented until verified.
+        """
+        m = self.metadata(P.pad_node(project, group, pad_num))
+        return int((m or {}).get("sym", 0) or 0)
