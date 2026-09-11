@@ -19,9 +19,11 @@ import logging
 import queue
 import threading
 import time
+import tarfile
 from dataclasses import dataclass
 
 from ..protocol import payloads as P
+from ..protocol import projects
 from ..protocol.sysex import CMD_FILE, CMD_GREET, RequestIds, Response, build_frame, parse_frame
 
 log = logging.getLogger(__name__)
@@ -201,7 +203,60 @@ class DeviceSession:
         """Resolved slot for a pad; 0 means the device considers it unassigned.
 
         A stale stored slot also reads 0 here. Only a project TAR read shows
-        the stored field; that read is not implemented until verified.
+        the stored field.
         """
         m = self.metadata(P.pad_node(project, group, pad_num))
-        return int((m or {}).get("sym", 0) or 0)
+        if m is None or "sym" not in m:
+            raise DeviceRejected("pad metadata unavailable", observed=m)
+        return int(m["sym"] or 0)
+
+
+    def project_tar(self, project: int) -> bytes:
+        payload = projects.project_open(project)  # validate before any I/O
+        self.greet()
+        self.begin_read()
+        r = self.request(CMD_FILE, payload)
+        if not r.ok:
+            raise DeviceRejected("project open rejected", project=project, status=r.status)
+        chunks = []
+        for page in range(projects.MAX_PROJECT_PAGES):
+            r = self.request(CMD_FILE, projects.project_page(page))
+            if not r.ok:
+                raise DeviceRejected("project page rejected", page=page, status=r.status)
+            try:
+                chunk = projects.page_data(r.payload, page)
+            except ValueError as e:
+                raise DeviceRejected(str(e), project=project, page=page) from e
+            chunks.append(chunk)
+            if len(chunk) < projects.PAGE_DATA_BYTES:
+                return b"".join(chunks)
+        raise DeviceRejected("project page limit reached without EOF", project=project)
+
+    def slot_exists(self, slot: int) -> bool:
+        r = self.request(CMD_FILE, P.metadata_get(slot))
+        if r.ok:
+            return True
+        if r.status == 1 and r.payload.rstrip(b"\0").lower() == b"invalid file id":
+            return False
+        raise DeviceRejected("slot existence unknown", slot=slot, status=r.status)
+
+    def list_pads(self, project: int | None = None) -> dict:
+        if project is not None:
+            projects.project_open(project)
+        else:
+            self.greet()
+            self.begin_read()
+            project = self.active_project()
+        try:
+            pads = projects.stored_pads(self.project_tar(project))
+        except (ValueError, tarfile.TarError) as e:
+            raise DeviceRejected("invalid project TAR", project=project, reason=str(e)) from e
+        self.begin_read()
+        # Only referenced slots need existence checks. This is local to this
+        # call, never cached across calls or inferred from resolved sym.
+        exists = {slot: self.slot_exists(slot) for slot in {p["stored_slot"] for p in pads}}
+        for pad in pads:
+            pad["sym"] = self.pad_sym(project, pad["group"], pad["pad"])
+            pad["node"] = P.pad_node(project, pad["group"], pad["pad"])
+            pad["stale_reference"] = pad["stored_slot"] != 0 and not exists[pad["stored_slot"]]
+        return {"project": project, "pads": pads}

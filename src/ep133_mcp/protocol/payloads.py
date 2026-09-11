@@ -2,7 +2,7 @@
 
 Every byte sequence here was sent to or received from hardware and is recorded
 in docs/research/. Nothing speculative is built here; in particular there is
-no FILE_DELETE and no raw-file open (`03 00`) until those are verified.
+no FILE_DELETE. Verified project reads live in projects.py.
 """
 
 from __future__ import annotations

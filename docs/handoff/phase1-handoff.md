@@ -17,7 +17,7 @@ this page tells you where, what is proven, and what will hurt you.
 | Backups | `~/Documents/ep133-backups/` — two `.pak` files with `.sha256` sidecars. **Read-only. Never commit.** |
 | Test asset | `fixtures/phase0-test-tone.wav` — synthesised, no third-party rights |
 
-Run: `uv sync --extra dev && uv run pytest -q` → 219 pass, with or without the device.
+Run: `uv sync --extra dev && uv run pytest -q` → 231 pass, with or without the device.
 Server: `uv run ep133-mcp` (stdio; logs on stderr).
 
 ## State of the plan
@@ -30,9 +30,9 @@ Phase 1 (`zmwcu8kp`):
 | Task | State |
 |---|---|
 | `4iq2m1k7` package + contracts | done |
-| `eya5iivi` device_info + list_pads | **device_info done; list_pads is the next thing** (in progress) |
-| `zjnizqio` backups + restore | blocked on `eya5iivi` — contracts already decided, see below |
-| `fazlbs50` preflight | blocked on `eya5iivi` |
+| `eya5iivi` device_info + list_pads | **done — device_info and list_pads hardware verified** |
+| `zjnizqio` backups + restore | ready — contracts already decided, see below |
+| `fazlbs50` preflight | ready |
 | `rbv6zfrx` install_sample | blocked on both |
 | `8zru1ujl` install_kit, `fseydiaq` release | later |
 
@@ -78,27 +78,30 @@ records, and `undo_last_install` reverts only journalled writes.
 matching. The server holds one `DeviceSession`. Do not run `tools/*.py` while
 the server is up. Sample Tool in a browser also counts.
 
-## Next step, concretely: `list_pads`
+## Project reader and list_pads: verified
 
-It must return, per pad, both the resolved `sym` **and** the stored slot/length
-from the project TAR, flagging `stale_reference` where the stored slot is
-absent from the library.
+See [`project-tar-read.md`](../research/project-tar-read.md). With the owner
+present and Sample Tool closed, all nine project TARs matched the local
+2026-09-11 backup byte-for-byte, and all 432 stored pad records and stale flags
+agreed. `list_pads(project=None)` now exposes resolved `sym`, stored slot/length,
+node, label, and `stale_reference`; default is the active project.
 
-That needs the one unverified protocol path: **reading a project TAR live**.
-Upstream documents it in `.upstream/ep133-ppak/ep133/project_reader.py`:
-read-mode `FILE_INIT`, then `03 00 <fid u16 BE> <u32 0>`, then `03 01 <page u16 BE>`
-until a page comes back short; each page has a 3-byte `00 00 NN` header.
+After response status is removed, project pages have a **two-byte big-endian
+page index**, followed by up to 324 data bytes. Timeouts are failures, never EOF.
+Only known project ids 3000..11000 are opened. Owner presence and one MIDI owner
+remain mandatory for hardware runs. Routine tests now stay offline.
 
-**Upstream warns a speculative `03 00` on the wrong file id can wedge the device
-into an error state needing a power cycle.** So:
-- Only open known project ids: `3000 + 1000*(N-1)` for N in 1..9.
-- Have the owner nearby the first time.
-- Verify the bytes against `P0N.tar` inside the 2026-09-11 backup before
-  trusting the reader. `tools/diff_backups.py` shows what to expect.
-- Done when `list_pads` on hardware agrees with the backup for all 432 pads.
+There are 170 nonzero stored references absent from the backup library, 63 with
+nonzero length. `stale_reference` includes zero-length records; slot 0 is not
+flagged. No delete or cleanup was attempted.
 
-After that, `zjnizqio` and `fazlbs50` are unblocked and their contracts are
-already written.
+## Next step: backup verification and preflight
+
+`zjnizqio` and `fazlbs50` are now unblocked. Follow the existing contracts:
+`verify_backup` compares stored records and library occupancy; it does not
+claim to restore. The backups remain private, read-only files on this machine.
+The task title mentioning confirmed restore is historical; the design explicitly
+excludes a restore tool.
 
 ## Device state right now
 

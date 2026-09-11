@@ -2,8 +2,7 @@
 
 A successful MCP handshake and tool round-trip through the real stdio client
 is the proof: any stray byte on stdout would break the JSON-RPC stream and the
-client would fail. Runs with or without hardware attached — device_info must
-either return real info or a structured DeviceUnavailable, never raise.
+client would fail. Never opens a hardware port. Device errors are tested with a fake session.
 """
 
 import json
@@ -29,7 +28,7 @@ async def test_handshake_lists_tools():
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
-    assert tools == {"device_info", "server_status"}
+    assert tools == {"device_info", "server_status", "list_pads"}
 
 
 @pytest.mark.asyncio
@@ -42,17 +41,14 @@ async def test_server_status_never_opens_the_port():
     assert status["write_tools_available"] is False
 
 
-@pytest.mark.asyncio
-async def test_device_info_is_structured_with_or_without_hardware():
-    async with stdio_client(SERVER) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            info = _payload(await session.call_tool("device_info"))
-    if "error" in info:
-        assert info["error"] == "DeviceUnavailable"
-        assert "next_step" in info
-    else:
-        assert info["product"] == "EP-133"
-        assert info["sample_free_bytes"] <= info["sample_capacity_bytes"]
-        assert 1 <= info["active_project"] <= 9
-        assert "serial" not in info, "serial must be opt-in"
+def test_device_info_unavailable_is_structured(monkeypatch):
+    from ep133_mcp import server as module
+    from ep133_mcp.device import DeviceUnavailable
+
+    def unavailable():
+        raise DeviceUnavailable("offline test", next_step="Connect the device")
+
+    monkeypatch.setattr(module, "_device", unavailable)
+    info = module.device_info()
+    assert info["error"] == "DeviceUnavailable"
+    assert "next_step" in info

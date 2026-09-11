@@ -37,6 +37,7 @@ server = MCPServer(
 
 _session: DeviceSession | None = None
 _session_lock = threading.Lock()
+_operation_lock = threading.RLock()
 
 
 def _device() -> DeviceSession:
@@ -63,11 +64,12 @@ def _error(e: DeviceError) -> dict[str, Any]:
 )
 def device_info(include_serial: bool = False) -> dict[str, Any]:
     try:
-        d = _device()
-        g = d.greet()
-        d.begin_read()
-        root = d.sample_root()
-        active = d.active_project()
+        with _operation_lock:
+            d = _device()
+            g = d.greet()
+            d.begin_read()
+            root = d.sample_root()
+            active = d.active_project()
     except DeviceUnavailable as e:
         return _error(e)
     except DeviceError as e:
@@ -91,6 +93,25 @@ def device_info(include_serial: bool = False) -> dict[str, Any]:
     if include_serial:
         info["serial"] = g.serial
     return info
+
+
+@server.tool(
+    name="list_pads",
+    description=(
+        "Read all 48 pads in a project (1–9, default active). Returns resolved sym, "
+        "stored slot and length, and stale_reference for nonzero stored slots "
+        "absent from the library. Reads fresh project TAR and metadata."
+    ),
+)
+def list_pads(project: int | None = None) -> dict[str, Any]:
+    if project is not None and not 1 <= project <= 9:
+        return {"error": "InvalidProject", "message": "project must be 1..9"}
+    try:
+        with _operation_lock:
+            return _device().list_pads(project)
+    except DeviceError as e:
+        log.warning("list_pads failed: %s", e)
+        return _error(e)
 
 
 @server.tool(
