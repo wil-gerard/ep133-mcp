@@ -111,3 +111,49 @@ run by the owner with the server stopped.
 - Housekeeping: duplicate `.pak`/`.ppak` copies in `~/Downloads` were
   hash-checked against `~/Documents/ep133-backups` and trashed (disk was at
   3.2 GB free).
+- **Byte diff (`session-03.pak`, sha256 `08483497…`)**: the "restore failed"
+  message did not recur; the next backup succeeded. `diff_projects.py
+  session-02 session-03`: `patterns/a01` 4 → 12 bytes and **the member on the
+  device is byte-identical to the one we generated** (`00 04 01 00 60 00 00 3c
+  64 18 00 00`) — header count 1, event tick 96 / pad 1 / note 60 / vel 100 /
+  dur 24 / byte 7 = 0 (**verified**). **Rung 3 passes: the pattern encoder is
+  proven on the device.**
+- Three other members changed because the owner opened and played P03 on the
+  device (which the rung requires), none of them in our file: `scenes` scene 1
+  `a04 → a01` (the owner selected A.01 while scene 1 was current) and `d05 →
+  d01` (the referenced `d05` does not exist; the device normalized it), trailer
+  `@604: 0f → 01`; `settings` 222 → 224 bytes with param bytes 94, 95, 120
+  changed — the same growth P04 showed after use, so **224 bytes is what the
+  device writes on save** (**verified** twice); `pads/b/p02 @16: 64 → 00`
+  (meaning unknown, **guessed**: a per-pad parameter rewritten on load).
+  Consequence for step 5: the undo diff must be read against these device
+  writes, not against a pristine `session-02`.
+- `check` on `session-03` fails only on the 224-byte `settings` files (P03,
+  P04) — the checker's assumption, not the device.
+
+### Rung 4 — new pattern file plus scene chunk: PASS
+
+- `generate_ppak(out=rung4-P03.ppak, project=3, template_pak=session-03.pak,
+  patterns=[D11 1 bar pad 9 "x...x...x...x...", A90/B90/C90 1 bar empty],
+  scenes=[{scene: 16, A: 90, B: 90, C: 90, D: 11}], include_sounds=true)` →
+  manifest `+a90 +b90 +c90` (4 bytes each), `+d11` (36 bytes), `scenes
+  @97+4: 00000000 → 5a5a5a0b`. Scene chunks are 6 bytes from offset 7, so
+  scene 16 = 7 + 15·6 = 97 (the P05 script's "offset 25" is scene 4).
+- Owner imported into P03, selected scene 16 (hold MAIN + dial), pressed
+  play: **slot 505 (D pad index 9, printed "3") on every beat, one-bar loop,
+  A/B/C silent**; the group buttons read A.90 B.90 C.90 D.11 (**verified** by
+  ear and display, owner report).
+- `session-04.pak` (sha256 `36cb1580…`), `verify_backup` → `current`.
+  `diff_projects.py session-03 session-04`: exactly the five manifest changes
+  — `d11`, `a90`, `b90`, `c90` and `scenes[97:101]` **byte-identical to the
+  generated file** (**verified**) — plus one device write, `scenes @604: 01 →
+  10`; 0 pad records differing.
+- Finding: **`scenes` byte 604 is the currently selected scene, 1-based**
+  (`0x10` = 16 after selecting scene 16; `0f → 01` in rung 3 after sitting on
+  scene 1; P04 `0a → 01` between the pre-session backups). Upstream calls it
+  "scene count"; `pattern-encoding.md` already recorded the data falsifying
+  that name. **verified** on three observations.
+
+**Ladder result: rungs 1–4 all pass. Everything `generate_ppak` emits — the
+container, an appended event, new pattern files, empty patterns and a scene
+chunk — is accepted by Sample Tool, stored byte-for-byte, and plays.**
