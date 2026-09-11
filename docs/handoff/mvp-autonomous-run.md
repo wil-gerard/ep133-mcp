@@ -32,9 +32,10 @@ at once. Do not ask for a second one.
 - `docs/research/` gets a page only for device-touching evidence or a finding
   that contradicts an earlier page. Offline work is documented by tests and
   Dex results, not prose.
-- Tests never download model weights or hit the network. The `beat_this`
-  and `demucs` checkpoints are already in this machine's caches; tests that
-  need them skip when absent (see `tests/test_analysis.py::beat_this_cached`).
+- Tests never download model weights or hit the network. The Beat This!
+  checkpoint is in the torch hub cache and (since 2026-09-11) the demucs
+  weights are in the HuggingFace cache; tests that need them skip when
+  absent (see `tests/test_analysis.py::beat_this_cached`).
 - Never commit `*.pak`, `*.ppak`, downloaded audio, or extracted slices.
   Fixtures are synthesized (`tests/synth_reference.py`).
 - Read [`fast-path-reference-to-song.md`](fast-path-reference-to-song.md)
@@ -110,6 +111,11 @@ at once. Do not ask for a second one.
    the session is ready. This is the first check-in.
 
 ## The one owner session — Dex `rwe8pqs8`
+
+Command list with real paths, prepared 2026-09-11:
+[`owner-session.md`](owner-session.md). Queue items 1–6 above are done
+(`f53c017`, `8078f2a`, `04ace53`, `f621665`, `e5e46a6`, `b9a47ea`); the
+"Where we are" table is superseded by that page's preconditions.
 
 Fresh full Sample Tool backup first. Non-active project throughout. Stop at
 the first failure, write it up in `docs/research/`, and continue with the
