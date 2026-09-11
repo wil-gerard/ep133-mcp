@@ -198,9 +198,14 @@ Still open:
 ### Restore procedure (as performed)
 
 In EP Sample Tool: **backup and restore → restore local backup**, pick the
-`.pak`, then confirm the "are you sure? potentially overwriting content" prompt.
-That prompt is the only destructive gate, so a restore is one misclick away —
-any tooling we build must never automate past it.
+`.pak`, then confirm a prompt warning that content may be overwritten, which
+requires **typing `OVERWRITE` into a field** before it will proceed.
+
+That is a deliberate typed-confirmation gate, not a single misclick — worth
+matching rather than weakening in our own destructive tools. It is also the
+model the brief already asks for: explicit confirmation naming the affected
+data, never bundled into a batch. Nothing we build should automate past it or
+synthesise that keystroke on the user's behalf.
 
 ## What this does and does not establish
 

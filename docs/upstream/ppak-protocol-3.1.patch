@@ -1,0 +1,98 @@
+--- a/PROTOCOL.md
++++ b/PROTOCOL.md
+@@ -121,14 +121,11 @@
+ 
+ Where `group_index` ∈ {A=0, B=1, C=2, D=3}, `pad_num` ∈ {1..12}.
+ 
+-### 3.1 Pad numbering — TWO DIFFERENT CONVENTIONS
++### 3.1 Pad numbering
+ 
+-Important pitfall, not previously documented. The EP-133 uses **two different
+-pad numbering conventions** for the same physical 4×3 pad grid:
++The EP-133 uses one pad numbering convention across the SysEx protocol and the
++project TAR: **top-down, left-right**, 1..12 over the physical 4×3 grid.
+ 
+-**SysEx `pad_num` convention** (used in `assign_pad`, `FILE_METADATA_SET` to
+-pad fileIds, etc.) — *top-down, left-right*:
+-
+ ```
+ row 0 (top):     pad_num 1="7"    2="8"    3="9"
+ row 1:           pad_num 4="4"    5="5"    6="6"
+@@ -136,43 +133,46 @@
+ row 3 (bottom):  pad_num 10="."  11="0"   12="ENTER"
+ ```
+ 
+-**Project TAR `pads/x/pNN` convention** (filename-based, inside the project
+-archive) — *bottom-up, left-right*:
++The project TAR path `pads/{group}/p{NN}` uses the same index, zero-padded:
++`pads/a/p10` is the "." pad, and `assign_pad(group="A", pad_num=10)` addresses
++that same pad. **No translation between the two is needed.**
+ 
+-```
+-row 3 (bottom):  p01="."   p02="0"   p03="ENTER"
+-row 2:           p04="1"   p05="2"   p06="3"
+-row 1:           p07="4"   p08="5"   p09="6"
+-row 0 (top):     p10="7"   p11="8"   p12="9"
+-```
++> **Previously documented incorrectly.** Earlier revisions of this section
++> described the TAR as bottom-up (`p01` = "." at bottom-left) and supplied a
++> row-reversing translation table between TAR `pNN` and SysEx `pad_num`.
++> Applying that table places every pad in the wrong row. See §3.2 for the
++> evidence that retired it.
+ 
+-So `pads/c/p01` (bottom-left of group C) corresponds to `assign_pad(group="C",
+-pad_num=10)`. Translation table:
++### 3.2 Evidence for the single-convention reading
+ 
+-| TAR pNN | SysEx pad_num | Label |
+-|---|---|---|
+-| 01 | 10 | "." |
+-| 02 | 11 | "0" |
+-| 03 | 12 | "ENTER" |
+-| 04 | 7 | "1" |
+-| 05 | 8 | "2" |
+-| 06 | 9 | "3" |
+-| 07 | 4 | "4" |
+-| 08 | 5 | "5" |
+-| 09 | 6 | "6" |
+-| 10 | 1 | "7" |
+-| 11 | 2 | "8" |
+-| 12 | 3 | "9" |
++Verified on EP-133 SKU TE032AS001, OS 2.5.1 (OS 2.5.1 Sample Tool backup,
++`pak_release` 1.2.0), plus this repository's own sources:
+ 
+-The user-facing "first pad" (bottom-left, label ".") is the natural starting
+-point for the bar_index → pad_num mapping at
+-[`tools/load_from_manifest.py`](tools/load_from_manifest.py).
++1. **This library already assumes it.** `ep133/song/format.py` writes
++   `PadSpec.pad` (1..12) directly into `pads/{group}/p{NN}` with no translation,
++   and the `build_pattern` comment records a device reference in which the "."
++   pad is stored at `pads/{group}/p10`. Since "." is `pad_num` 10, TAR numbering
++   equals `pad_num` numbering. `test_build_pattern_pad_indicator_is_pad_minus_one_times_8`
++   encodes the same reference.
+ 
+-Why this matters: when patching a `.ppak` programmatically (writing pad
+-records into the TAR), `pads/c/p01` is the bottom-left pad. When sending
+-SysEx pad assignments to the same physical pad, you write to `pad_num=10`.
+-Mixing these up silently lands assignments on the wrong physical pad.
++2. **432-pad read comparison.** Reading `sym` from every pad metadata node on a
++   device and comparing against the slot ids decoded from the project TARs of a
++   Sample Tool backup taken minutes earlier: node suffix `NN` matched TAR `pNN`
++   with 369 exact agreements and 0 unexplained mismatches (63 further pads are
++   explained by library slots deleted after assignment, where the TAR keeps the
++   stale slot id and the device reports the pad empty). Scoring the row-reversed
++   mapping against the same snapshot left 118 pads unexplained.
++
++3. **Two single-pad writes.** `FILE_METADATA_SET {"sym":14}` to pad fileId 7204
++   loaded the pad physically labelled "4"; the same write to 7207 loaded the pad
++   labelled "1". Both agree with the §3 `pad_fid` formula and the `pad_num`
++   table above.
+ 
++Scope of this evidence: one unit on one OS. Items 2 and 3 verify reading device
++metadata and reading a Sample Tool *export*; item 1 is import-side but was not
++independently round-tripped by the reporter. If §3.1's earlier table described a
++different Sample Tool version, that is worth noting rather than deleting.
++
+ ## 4. Top-level Commands
+ 
+ Command byte at SysEx frame byte 8.
