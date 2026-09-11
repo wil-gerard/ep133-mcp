@@ -15,7 +15,7 @@ from .errors import AudioToolsUnavailable
 
 EXTRA_INSTALL = "uv sync --extra audio"
 SYSTEM_INSTALL = "brew install ffmpeg"
-PYTHON_MODULES = ("numpy", "soundfile", "librosa", "yt_dlp", "demucs")
+PYTHON_MODULES = ("numpy", "soundfile", "librosa", "yt_dlp", "demucs", "beat_this")
 
 
 def which(name: str) -> str | None:

@@ -63,10 +63,13 @@ with the install command when the extra is missing.
    `source.json` (url, video id, title, start/end). Cap clips at 60 s. Spotify
    URLs go through the oEmbed → YouTube search hop described above. Cache by
    (video id, start, end).
-2. **`analyze_reference(clip)`** → `bpm` (librosa beat track, with confidence
-   and half/double-time alternates), `key` (chroma template match, probable),
-   `downbeat_s`, and per-stem onset lists after demucs (`drums`, `bass`,
-   `other`, `vocals`). Cache next to the clip.
+2. **`analyze_reference(clip)`** → `bpm` (with confidence and half/double-time
+   alternates) and `downbeat` from Beat This! (CPJKU, MIT, `beat_this` on
+   PyPI; librosa beat tracking + kick-band phase guess as the fallback, the
+   same shape as demucs → HPSS), `key` (chroma template match, probable), and
+   per-stem onset lists after demucs (`drums`, `bass`, `other`, `vocals`).
+   Cache next to the clip. librosa alone missed the 1 % BPM acceptance on the
+   fixture (98.4 for 97); Beat This! meets it and returns downbeats directly.
 3. **`extract_kit(clip, want)`** → up to 12 one-shots. `want` defaults to
    `kick, snare, hat, perc×3, bass×3, melodic×3`. Drum hits: onsets on the
    drums stem, clustered by spectral centroid/flatness into kick/snare/hat,

@@ -17,7 +17,7 @@ ep133-mcp = "ep133_mcp.server:main"
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 # Reference-song pipeline (fetch/analyze/extract). ffmpeg is a system dependency.
-audio = ["yt-dlp>=2025.1", "librosa>=0.10", "soundfile>=0.12", "numpy>=1.26", "demucs>=4.0"]
+audio = ["yt-dlp>=2025.1", "librosa>=0.10", "soundfile>=0.12", "numpy>=1.26", "demucs>=4.0", "beat_this>=1.1"]
 
 [build-system]
 requires = ["hatchling"]
