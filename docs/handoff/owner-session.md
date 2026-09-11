@@ -86,12 +86,14 @@ diff `session-01` → `session-02`: **no differences**. If Sample Tool refuses
 the file, the container (ZIP flags/extra fields, `generated_at`) is the
 finding — compare `unzip -v` of the two `.ppak`s.
 
-**Rung 3 — one added note.** Agent, server running:
+**Rung 3 — one added note.** Server stopped, pick an empty 16th S in `a01`
+for pad 7:
 
 ```sh
-uv run python tools/pattern_decode.py dump $B/session-02.pak --project P05   # server stopped; pick an empty 16th in a01 for pad 7
+uv run python tools/pattern_decode.py dump $B/session-02.pak --project P05
 ```
 
+Then, server running, the agent calls
 `generate_ppak(out="$B/rung3-P05.ppak", project=5, template_pak="$B/session-02.pak",
 patterns=[{"group": "A", "index": 1, "add": [{"pad": 7, "step": S}]}], include_sounds=true)`
 → manifest shows `patterns/a01` **extended**, `events_added: 1`, header
