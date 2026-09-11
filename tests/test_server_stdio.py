@@ -70,7 +70,7 @@ async def test_all_tools_through_client_with_fake_device(tmp_path):
                    'device_version': '2.5.1', 'pak_type': 'user'}))
         for p in range(1, 10):
             z.writestr(f'/projects/P{p:02}.tar', fake.project_tar(p))
-        z.writestr('/sounds/016 tone.wav', b'fixture')
+        z.writestr('/sounds/016 tone.wav', (Path(__file__).parents[1] / 'fixtures/phase0-test-tone.wav').read_bytes())
     wav = wav_file(tmp_path)
     code = '''
 from types import SimpleNamespace

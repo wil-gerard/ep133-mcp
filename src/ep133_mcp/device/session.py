@@ -15,6 +15,8 @@ Design rules (docs/design/tool-contracts.md):
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 import logging
 import queue
 import threading
@@ -69,6 +71,7 @@ class DeviceSession:
         self._lock = threading.Lock()
         self._out = None
         self._in = None
+        self._ownership = None
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -77,18 +80,24 @@ class DeviceSession:
 
         outs = [n for n in mido.get_output_names() if PORT_NAME in n]
         ins = [n for n in mido.get_input_names() if PORT_NAME in n]
-        if not outs or not ins:
+        if len(outs) != 1 or len(ins) != 1:
             raise DeviceUnavailable(
-                "EP-133 MIDI endpoints not found",
+                "Expected exactly one EP-133 MIDI input and output",
                 outputs=mido.get_output_names(),
                 inputs=mido.get_input_names(),
                 next_step="Connect and power the EP-133 over a data-capable USB cable, "
                           "and close EP Sample Tool or any other program holding the port.",
             )
         try:
+            import fcntl
+            directory = Path.home() / '.local/state/ep133-mcp'
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._ownership = (directory / 'device.lock').open('a')
+            fcntl.flock(self._ownership.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._out = mido.open_output(outs[0])
             self._in = mido.open_input(ins[0], callback=self._on_message)
-        except OSError as e:
+        except (OSError, ImportError) as e:
+            self.close()
             raise DeviceUnavailable(
                 f"could not open EP-133 port: {e}",
                 next_step="Another process may own the port. Close it and retry.",
@@ -101,6 +110,9 @@ class DeviceSession:
             if port is not None:
                 port.close()
         self._in = self._out = None
+        if self._ownership is not None:
+            self._ownership.close()
+            self._ownership = None
 
     def __enter__(self):
         return self.open()
@@ -127,9 +139,9 @@ class DeviceSession:
             import mido
             self._out.send(mido.Message("sysex", data=frame[1:-1]))
             time.sleep(self._delay)
-            deadline = time.time() + self._timeout
+            deadline = time.monotonic() + self._timeout
             while True:
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise DeviceTimeout(
                         f"no response to command 0x{command:02x} (request {rid})",
@@ -139,7 +151,7 @@ class DeviceSession:
                     r = self._responses.get(timeout=remaining)
                 except queue.Empty:
                     continue
-                if r.request_id == rid:
+                if r.request_id == rid and r.command == command:
                     return r
                 log.debug("discarding unmatched response id=%s", r.request_id)
 
@@ -167,19 +179,22 @@ class DeviceSession:
         for page in range(MAX_METADATA_PAGES):
             r = self.request(CMD_FILE, P.metadata_get(file_id, page))
             if not r.ok:
-                if page == 0:
+                if page == 0 and r.status == 1 and r.payload.rstrip(b'\0').lower() == b'invalid file id':
                     return None
-                break
+                raise DeviceRejected('metadata read rejected', file_id=file_id, page=page, status=r.status)
             chunk = P.parse_metadata_page(r.payload)
             if not chunk:
-                break
+                return {'_unparsed': len(body)}
             body += chunk
             end = body.find(b"\0")
             if end >= 0:
                 body = body[:end]
                 break
+        else:
+            return {'_unparsed': len(body)}
         try:
-            return json.loads(body.decode("utf-8"))
+            parsed = json.loads(body.decode("utf-8"))
+            return parsed if isinstance(parsed, dict) else {'_unparsed': len(body)}
         except (UnicodeDecodeError, json.JSONDecodeError):
             return {"_unparsed": len(body)}
 

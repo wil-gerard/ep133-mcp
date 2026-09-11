@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import os
 import time
 import zipfile
@@ -21,7 +22,7 @@ def make_backup(tmp_path, *, missing=None, meta=None):
         for p in range(1, 10):
             if p != missing:
                 z.writestr(f'/projects/P{p:02}.tar', archive())
-        z.writestr('/sounds/016 tone.wav', b'fixture')
+        z.writestr('/sounds/016 tone.wav', (Path(__file__).parents[1] / 'fixtures/phase0-test-tone.wav').read_bytes())
     return path
 
 
@@ -115,3 +116,17 @@ def test_device_failure_never_registers_backup(tmp_path):
         registry.verify(path, device)
     with pytest.raises(BackupStale):
         registry.require_current(result['backup_id'], device)
+
+
+def test_invalid_audio_cannot_authorize_writes(tmp_path):
+    path = make_backup(tmp_path)
+    with zipfile.ZipFile(path, 'a') as z:
+        z.writestr('/sounds/017 corrupt.wav', b'not audio')
+    with pytest.raises(InvalidBackup):
+        read_backup(path)
+
+
+@pytest.mark.parametrize('age', [0, -1, float('inf'), float('nan')])
+def test_age_configuration_must_be_finite_positive(age):
+    with pytest.raises(ValueError):
+        BackupRegistry(age)

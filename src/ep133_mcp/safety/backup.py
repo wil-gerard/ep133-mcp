@@ -4,11 +4,15 @@ from dataclasses import dataclass
 import hashlib
 import io
 import json
+import math
+import os
 from pathlib import Path
 import re
 import tarfile
 import time
 import zipfile
+import wave
+import zlib
 
 from ..protocol.projects import stored_pads
 from .errors import BackupStale, InvalidBackup
@@ -34,7 +38,7 @@ def read_backup(path: str | Path) -> Backup:
     try:
         with path.open('rb') as source:
             data = source.read(MAX_ARCHIVE_BYTES + 1)
-            modified_at = path.stat().st_mtime
+            modified_at = os.fstat(source.fileno()).st_mtime
         if len(data) > MAX_ARCHIVE_BYTES:
             raise ValueError('archive exceeds 128 MiB limit')
         with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -64,6 +68,11 @@ def read_backup(path: str | Path) -> Backup:
                     slot = int(match[1])
                     if slot not in LIBRARY_SLOTS or slot in slots:
                         raise ValueError('duplicate or invalid library slot')
+                    with wave.open(io.BytesIO(z.read(member)), 'rb') as wav:
+                        frames = wav.getnframes()
+                        expected = frames * wav.getnchannels() * wav.getsampwidth()
+                        if frames <= 0 or expected > MAX_ARCHIVE_BYTES or len(wav.readframes(frames)) != expected:
+                            raise ValueError('empty, oversized or truncated backup sound')
                     slots.add(slot)
             pads = {}
             for project in range(1, 10):
@@ -76,7 +85,7 @@ def read_backup(path: str | Path) -> Backup:
         return Backup(path.resolve(), hashlib.sha256(data).hexdigest(), modified_at,
                       meta, slots, pads)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, tarfile.TarError,
-            RuntimeError, NotImplementedError) as e:
+            RuntimeError, NotImplementedError, EOFError, wave.Error, zlib.error) as e:
         raise InvalidBackup('Backup archive could not be validated', observed=str(e),
                             expected='Complete Sample Tool user .pak',
                             next_step='Create a fresh full backup with EP Sample Tool.') from e
@@ -84,6 +93,9 @@ def read_backup(path: str | Path) -> Backup:
 
 def snapshot(device) -> dict:
     greeting = device.greet()
+    if not greeting.sku or not greeting.os_version or not greeting.serial:
+        raise InvalidBackup('Device identity is incomplete',
+                            next_step='Reconnect and retry device_info before verification.')
     device.begin_read()
     slots = {slot for slot in LIBRARY_SLOTS if device.slot_exists(slot)}
     pads = {}
@@ -123,7 +135,7 @@ def differences(backup: Backup, live: dict) -> list[dict]:
 
 class BackupRegistry:
     def __init__(self, max_age_seconds: float = 86400):
-        if max_age_seconds <= 0:
+        if not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
             raise ValueError('backup age must be positive')
         self.max_age_seconds = max_age_seconds
         self._verified = {}
