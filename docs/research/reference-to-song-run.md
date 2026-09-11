@@ -157,3 +157,28 @@ run by the owner with the server stopped.
 **Ladder result: rungs 1–4 all pass. Everything `generate_ppak` emits — the
 container, an appended event, new pattern files, empty patterns and a scene
 chunk — is accepted by Sample Tool, stored byte-for-byte, and plays.**
+
+## Interlude — sound library export and device cleanup (owner request)
+
+- `tools/export_library.py session-04.pak --out ~/Documents/ep133-library`
+  (new tool, `c75fccf`): 109 slots, 58.7 MB of WAV — equal to the device's
+  62.85 MB capacity minus the 3.97 MB free, so the backup holds the entire
+  sample space. `manifest.json` records size, sha256, WAV format and every
+  referencing pad record per slot. 46 slots are stored by at least one pad in
+  the nine projects; 63 are stored by none; 118 stored slot ids point at
+  nothing (stale references). Slot 15 (Phase 0 test tone) is "used" only
+  through P06 A4's length-0 record — the stale-reference arming from
+  `phase1-handoff.md`.
+- The owner deleted 62 of the 63 unused slots in Sample Tool (kept 704).
+  `session-05.pak` (sha256 `f0bf2a3e…`): `diff_backups.py session-04
+  session-05` → library 109 → 47, the removed set is exactly 62 members of
+  the unused list, **0 pad records differing**; `diff_projects.py` → no
+  differences in any project (**verified**). `verify_backup` → `current`;
+  `device_info` → `sample_free_bytes` 3,973,332 → **27,637,368**.
+- `device_info` also now reports `active_project: 3`: the owner has been
+  operating P03 on the device, and `active` is the loaded project. The device
+  is switched to another project before step 3's install and step 4's import
+  so P03 is non-active again for every write.
+- Deleting from the agent side is deferred to Dex `mzgyw615` (`delete_samples`:
+  FILE_DELETE `06 02 <fid>` is documented upstream but unverified here; a
+  slot-15 proof comes first).
