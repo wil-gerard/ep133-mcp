@@ -36,6 +36,7 @@ STEM_NAMES = ("drums", "bass", "other", "vocals")
 BASS_SPLIT_HZ = 200.0
 KICK_BAND_HZ = 150.0
 MIN_BPM, MAX_BPM = 40.0, 250.0
+ONSET_LEAD_FRAMES = 8      # silence prepended before onset picking so t=0 can be an onset
 ONSET_GATE = 0.05          # onsets weaker than this fraction of the stem's peak strength are dropped
 SILENT_DBFS = -50.0
 DEMUCS_MODEL = "htdemucs"
@@ -218,15 +219,20 @@ def detect_onsets(y, sr: int) -> dict:
 
     if y is None or _dbfs(y) < SILENT_DBFS:
         return {"onsets_s": [], "strength": [], "starts_s": []}
-    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP)
-    peak = float(env.max()) if len(env) else 0.0
+    # Leading silence so a hit on the very first sample (a clip cut on a downbeat) can be peak-picked.
+    env = librosa.onset.onset_strength(y=np.concatenate([np.zeros(ONSET_LEAD_FRAMES * HOP, dtype=y.dtype), y]),
+                                       sr=sr, hop_length=HOP)
+    # The silence-to-signal edge itself can dwarf every real hit and onset_detect normalises by the
+    # maximum, so the boundary frames are capped at the peak of the rest of the envelope.
+    peak = float(env[ONSET_LEAD_FRAMES + 2:].max()) if len(env) > ONSET_LEAD_FRAMES + 2 else 0.0
     if peak <= 0:
         return {"onsets_s": [], "strength": [], "starts_s": []}
+    env[:ONSET_LEAD_FRAMES + 2] = np.minimum(env[:ONSET_LEAD_FRAMES + 2], peak)
     frames = librosa.onset.onset_detect(onset_envelope=env, sr=sr, hop_length=HOP, backtrack=False, units="frames")
     frames = np.asarray([f for f in frames if env[f] >= ONSET_GATE * peak], dtype=int)
     starts = librosa.onset.onset_backtrack(frames, env) if len(frames) else frames
-    times = librosa.frames_to_time(frames, sr=sr, hop_length=HOP)
-    start_times = librosa.frames_to_time(starts, sr=sr, hop_length=HOP)
+    times = librosa.frames_to_time(np.maximum(frames - ONSET_LEAD_FRAMES, 0), sr=sr, hop_length=HOP)
+    start_times = librosa.frames_to_time(np.maximum(starts - ONSET_LEAD_FRAMES, 0), sr=sr, hop_length=HOP)
     return {"onsets_s": [round(float(t), 4) for t in times],
             "strength": [round(float(env[f] / peak), 4) for f in frames],
             "starts_s": [round(float(t), 4) for t in start_times]}

@@ -10,8 +10,9 @@ member of any cluster that is farthest in feature space from its exemplar,
 when that distance is large enough to be a different sound (open vs closed
 hat, rim vs snare); otherwise they stay unfilled and say so.
 
-Bass and melodic: pyin over the first PITCH_WINDOW_S of each onset on the
-bass / other stem. An onset counts as a note only when pyin is reasonably sure
+Bass and melodic: pyin over each onset on the bass / other stem, up to
+PITCH_WINDOW_S or the next onset, so a coincident drum hit at the attack does
+not own the whole window. An onset counts as a note only when pyin is reasonably sure
 it is voiced; frames are weighted by voiced probability so a kick tail leaking
 into the bass stem does not become a note. Distinct MIDI notes are ranked by
 their total support and the strongest onset of each is the exemplar.
@@ -49,7 +50,8 @@ MAX_SLICE_S = 1.0
 MIN_SLICE_S = 0.03
 FADE_S = 0.005
 FEATURE_WINDOW_S = 0.05
-PITCH_WINDOW_S = 0.2
+PITCH_WINDOW_S = 0.5          # pyin sees this much of a note, cut at the next onset but never under PITCH_MIN_S
+PITCH_MIN_S = 0.2
 LOW_BAND_HZ = 150.0
 PERC_MIN_DISTANCE = 1.5       # z-scored feature distance before a cluster member counts as a different sound
 MIN_VOICED_PROBABILITY = 0.3  # pyin's best frame must be at least this sure before an onset yields a note
@@ -169,17 +171,17 @@ def perc_candidates(features, clusters: dict[str, list[int]], exemplars: dict[st
 
 # --- pitched onsets ------------------------------------------------------------------
 
-def pitched_onsets(y, sr: int, starts: list[float], note_range: tuple[str, str]) -> list[dict]:
+def pitched_onsets(y, sr: int, starts: list[float], gaps, note_range: tuple[str, str]) -> list[dict]:
     """Per onset: {index, midi, confidence} for onsets pyin is reasonably sure are voiced."""
     import librosa
     import numpy as np
 
     fmin, fmax = (float(librosa.note_to_hz(n)) for n in note_range)
-    window = int(sr * PITCH_WINDOW_S)
     frame_length = int(2 ** math.ceil(math.log2(2 * sr / fmin)))
     out = []
     for i, start in enumerate(starts):
         begin = int(start * sr)
+        window = int(sr * min(PITCH_WINDOW_S, max(PITCH_MIN_S, float(gaps[i]))))
         segment = y[begin:begin + window]
         if len(segment) < frame_length:
             segment = np.pad(segment, (0, frame_length - len(segment)))
@@ -187,10 +189,13 @@ def pitched_onsets(y, sr: int, starts: list[float], note_range: tuple[str, str])
         sure = probability >= MIN_VOICED_PROBABILITY
         if not np.any(sure & ~np.isnan(f0)):
             continue
-        midi = librosa.hz_to_midi(f0[sure & ~np.isnan(f0)])
+        midi = np.rint(librosa.hz_to_midi(f0[sure & ~np.isnan(f0)])).astype(int)
         weights = probability[sure & ~np.isnan(f0)]
-        note = int(round(float(np.average(midi, weights=weights))))
-        out.append({"index": i, "midi": note, "confidence": round(float(probability.max()), 3)})
+        # Weighted mode, not mean: a window that runs into the next note must not average the two.
+        support = {int(n): float(weights[midi == n].sum()) for n in np.unique(midi)}
+        note = max(support, key=support.get)
+        out.append({"index": i, "midi": note,
+                    "confidence": round(float(probability[sure & ~np.isnan(f0)][midi == note].max()), 3)})
     return out
 
 
@@ -277,7 +282,7 @@ def extract_kit(clip: str | Path, want=None, separation: str = "auto", beat_trac
         stem = stems.get(STEM_FOR[cls])
         if not stem:
             continue
-        notes = pitched_onsets(stem["audio"], stem["sr"], stem["starts_s"], PITCH_RANGES[cls])
+        notes = pitched_onsets(stem["audio"], stem["sr"], stem["starts_s"], stem["gaps"], PITCH_RANGES[cls])
         for note in pick_notes(notes, stem["strength"], want.count(cls)):
             chosen[cls].append((note["index"], {"note": note["midi"], "pitch_confidence": note["confidence"],
                                                 "support": note["support"]}))
