@@ -122,3 +122,14 @@ def test_missing_kit(tmp_path):
     truth = synth_reference.write(tmp_path / 'ref')
     with pytest.raises(InvalidReference):
         groove.transcribe_groove(truth['clip'], **FALLBACK)
+
+
+def test_kit_from_another_clip_is_rejected(fixture, tmp_path):
+    """Exemplars are times into the kit's own clip: a foreign kit must not silently mis-transcribe."""
+    record = json.loads(Path(groove.kit_paths(fixture['clip'])[1]).read_text())
+    for entry in record['slices']:
+        entry['source_s'] = [entry['source_s'][0] + 3600.0, entry['source_s'][1] + 3600.0]
+    foreign = tmp_path / 'foreign_kit.json'
+    foreign.write_text(json.dumps(record))
+    with pytest.raises(InvalidReference, match='different clip'):
+        groove.transcribe_groove(fixture['clip'], kit=foreign, downbeat_s=0.0, **FALLBACK)

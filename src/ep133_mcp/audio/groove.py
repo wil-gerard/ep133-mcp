@@ -143,6 +143,13 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     kit_record = load_kit(clip, kit)
     pads = [s for s in kit_record["slices"] if s["class"] in DRUM_CLASSES]
     pad_of = {p["class"]: p["pad"] for p in pads}
+    # Exemplars are timestamps into the kit's own clip; a kit from a different clip silently
+    # collapses every onset onto whichever exemplar still lands inside this audio.
+    outside = [p["class"] for p in pads if not 0.0 <= p["source_s"][0] < float(analysis["duration_s"])]
+    if outside:
+        raise InvalidReference("Kit was extracted from a different clip", observed=outside,
+                               expected=f"exemplar times inside 0..{float(analysis['duration_s']):.2f}s",
+                               next_step="Run extract_kit on this clip and pass that kit.json.")
     drums = analysis["stems"].get("drums")
     if not drums or not drums["onsets_s"]:
         raise InvalidReference("No drum onsets to transcribe", observed=drums and drums.get("level_dbfs"),
