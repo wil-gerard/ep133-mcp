@@ -54,10 +54,16 @@ The residual is consistent with per-sample store overhead or block alignment and
 is far too small to hide an omitted sample. The backup covers the whole sample
 store. The exact cause of the 167,810 B residual is **not** established.
 
-Note that the archive stores 44.1 kHz WAVs while the device reports
-`samplerate.native` 46875. A `.pak` is therefore not proven to be a bit-exact
-copy of stored PCM. Whether Sample Tool resamples on export, on import, or both
-is unverified, and it matters for any claim that restore is lossless.
+The archive stores 44.1 kHz WAVs while the device reports `samplerate.native`
+46875. Resolved 2026-09-10: reading slot metadata directly shows the **device
+itself** stores `"samplerate":44100` for those samples (slot 14, `090grave`,
+`"channels":2,"format":"s16"`). So 44.1 kHz is the stored rate, not something
+Sample Tool introduced on export, and `samplerate.native` is the rate the device
+*records* at, not a rate it forces on imports — consistent with the advertised
+`samplerate.range` of 1–65535. The export looks faithful.
+
+This does not by itself prove the audio round-trip is bit-exact; it removes the
+specific reason to think it is lossy.
 
 ## Verification against the live device
 
@@ -189,9 +195,10 @@ Still open:
   a merge. Deciding it needs a restore performed while the library differs.
 - The 63 dangling references survived the restore unchanged, which is consistent
   with restore reproducing the backup faithfully rather than repairing state.
-- Lossiness is unverified. The archive holds 44.1 kHz WAVs while the device
-  reports `samplerate.native` 46875, so whether a restore round-trip is
-  bit-exact on audio is untested — pad metadata is what was checked here.
+- Audio round-trip bit-exactness is still untested; pad metadata is what was
+  checked here. The 44.1 kHz concern is resolved (see Completeness above) — the
+  device stores that rate itself — but that is not the same as proving restore
+  returns identical PCM.
 - Replace-vs-merge is still undetermined (see above); the confirmation dialog's
   wording suggests replace, but wording is not evidence.
 

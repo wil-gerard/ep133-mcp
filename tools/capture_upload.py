@@ -73,15 +73,22 @@ def req(t, cmd, payload, ident, label, timeout=10.0):
 
 
 def meta_get(t, file_id, ident, label):
+    """Return (exists, parsed_or_None).
+
+    Occupancy is the STATUS, never the parse result. An occupied slot answers
+    status 0 with JSON; an empty one answers status 1 "invalid file id". Large
+    slot metadata can exceed one page and fail to parse while still existing,
+    so treating a parse failure as "empty" would overwrite a real sample.
+    """
     r = req(t, 5, bytes([7, 2, (file_id >> 8) & 0xFF, file_id & 0xFF, 0, 0]), ident, label)
     if r.status != 0:
-        return None
+        return False, None
     body = r.raw_data[2:]
     end = body.find(b"\x00")
     try:
-        return json.loads((body[:end] if end >= 0 else body).decode())
+        return True, json.loads((body[:end] if end >= 0 else body).decode())
     except Exception:
-        return None
+        return True, {"_unparsed_bytes": len(body)}
 
 
 def main():
@@ -99,16 +106,17 @@ def main():
         ident = req(t, TE_SYSEX_GREET, b"", 0, "preflight/greet").identity_code
         req(t, 5, bytes([1, 0, 0, 0x40, 0, 0]), ident, "preflight/file_init_read")
 
-        root = meta_get(t, 1000, ident, "preflight/sample_root") or {}
+        _, root = meta_get(t, 1000, ident, "preflight/sample_root")
+        root = root or {}
         free = root.get("free_space_in_bytes")
         print(f"free memory: {free} bytes")
         if free is None or free <= len(pcm):
             sys.exit(f"ABORT: {len(pcm)} bytes will not fit in {free}. Nothing sent.")
 
-        existing = meta_get(t, args.slot, ident, "preflight/target_slot")
-        if existing:
+        occupied, existing = meta_get(t, args.slot, ident, "preflight/target_slot")
+        if occupied:
             sys.exit(f"ABORT: slot {args.slot} is occupied: {existing}. Nothing sent.")
-        print(f"slot {args.slot} is free")
+        print(f"slot {args.slot} is free (device reports no such file id)")
 
         # ---- upload, GREET through terminator (exactly upstream's sequence) ----
         seq = [(TE_SYSEX_GREET, b"", "upload/greet"),
@@ -130,24 +138,24 @@ def main():
                 print(f"  sent {i + 1}/{len(seq)}  {label}")
 
         # ---- CHECK A: committed by the terminator alone? ----
-        a_root = meta_get(t, 1000, ident, "checkA/sample_root") or {}
-        a_slot = meta_get(t, args.slot, ident, "checkA/target_slot")
+        _, a_root = meta_get(t, 1000, ident, "checkA/sample_root")
+        a_root = a_root or {}
+        committed_a, a_slot = meta_get(t, args.slot, ident, "checkA/target_slot")
         print(f"\nCHECK A (after terminator, before FILE_INFO)")
         print(f"  free: {free} -> {a_root.get('free_space_in_bytes')}")
-        print(f"  slot {args.slot}: {a_slot}")
+        print(f"  slot {args.slot}: exists={committed_a} {a_slot}")
 
         # ---- FILE_INFO ----
         fi = req(t, TE_SYSEX_FILE, P.build_file_info(args.slot), ident, "finalize/file_info")
         print(f"\nFILE_INFO -> status={fi.status} ({fi.status_text})")
 
-        b_root = meta_get(t, 1000, ident, "checkB/sample_root") or {}
-        b_slot = meta_get(t, args.slot, ident, "checkB/target_slot")
+        _, b_root = meta_get(t, 1000, ident, "checkB/sample_root")
+        b_root = b_root or {}
+        committed_b, b_slot = meta_get(t, args.slot, ident, "checkB/target_slot")
         print(f"\nCHECK B (after FILE_INFO)")
         print(f"  free: {free} -> {b_root.get('free_space_in_bytes')}")
-        print(f"  slot {args.slot}: {b_slot}")
+        print(f"  slot {args.slot}: exists={committed_b} {b_slot}")
 
-        committed_a = bool(a_slot)
-        committed_b = bool(b_slot)
         print("\nVERDICT:", (
             "terminator commits; upload_sample's FILE_INFO docstring is wrong" if committed_a
             else "FILE_INFO commits; upload_sample never sends it and is broken" if committed_b
