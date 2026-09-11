@@ -59,11 +59,14 @@ def test_scene_bpm_and_pad_patches():
             enc.patch_scene(scenes, 1, bad)
     with pytest.raises(ValueError):
         enc.patch_scene(bytes(700), 1, {"A": 1, "B": 1, "C": 1, "D": 1})
-    settings = enc.patch_bpm(bytes(222), 97.5)
-    assert enc.decode_bpm(settings) == pytest.approx(97.5) and settings[8:] == bytes(214)
+    for size in enc.SETTINGS_SIZES:                     # the device writes 222 and 224; 220 seen upstream
+        settings = enc.patch_bpm(bytes(size), 97.5)
+        assert enc.decode_bpm(settings) == pytest.approx(97.5) and settings[8:] == bytes(size - 8)
     for bad in (10, 500, "120", True):
         with pytest.raises(ValueError):
             enc.patch_bpm(bytes(222), bad)
+    with pytest.raises(ValueError):
+        enc.patch_bpm(bytes(221), 97.5)
     record = enc.patch_pad_record(bytes(range(27)), 16, 18750)
     assert struct.unpack_from("<H", record, 1)[0] == 16 and struct.unpack_from("<I", record, 8)[0] == 18750
     assert record[0] == 0 and record[3:8] == bytes(range(3, 8)) and record[12:] == bytes(range(12, 27))

@@ -275,7 +275,7 @@ def cmd_check(projects: dict[str, dict[str, bytes]]) -> int:
                         print(f"NOTE {pname}/scenes: scene {c['scene']} references missing patterns/{g}{c[g]:02d}")
         else:
             fail(f"{pname}: no scenes file")
-        for fname, sizes in (("settings", (220, 222)), ("fx_settings", (144, 160))):
+        for fname, sizes in (("settings", (220, 222, 224)), ("fx_settings", (144, 160))):
             if fname not in files:
                 fail(f"{pname}: no {fname} file")
             elif len(files[fname]) not in sizes:
