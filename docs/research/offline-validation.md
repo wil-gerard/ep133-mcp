@@ -21,7 +21,14 @@ uv run --no-project --python 3.12 --with pytest --with numpy --with soundfile --
 
 These commands use an isolated uv environment and do not install the upstream project into this repository. Dependency versions are resolved by uv; the source revision is pinned, but this is not a locked build environment.
 
-## Upload finalization discrepancy
+## Upload finalization discrepancy — RESOLVED 2026-09-10
+
+The terminator commits the upload; FILE_INFO is accepted but changes nothing.
+`upload_sample` is correct and its docstring is wrong. See
+[upload capture](upload-capture.md) for the in-session probe and the frame
+capture. Original note follows.
+
+### Original note
 
 `ep133/client.py:upload_sample` says FILE_INFO is needed to commit uploaded audio. Its implementation only sends the sequence returned by `generate_upload_payloads`, which ends at the empty terminator. `tests/test_payloads.py:test_full_reproduction` intentionally excludes the final captured FILE_INFO, and `test_finalize_is_file_info` checks that message separately.
 

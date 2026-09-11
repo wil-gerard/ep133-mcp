@@ -80,15 +80,26 @@ def meta_get(t, file_id, ident, label):
     slot metadata can exceed one page and fail to parse while still existing,
     so treating a parse failure as "empty" would overwrite a real sample.
     """
-    r = req(t, 5, bytes([7, 2, (file_id >> 8) & 0xFF, file_id & 0xFF, 0, 0]), ident, label)
-    if r.status != 0:
-        return False, None
-    body = r.raw_data[2:]
-    end = body.find(b"\x00")
+    body = b""
+    for page in range(8):
+        r = req(t, 5, bytes([7, 2, (file_id >> 8) & 0xFF, file_id & 0xFF, 0, page]),
+                ident, f"{label}[p{page}]")
+        if r.status != 0:
+            if page == 0:
+                return False, None
+            break
+        chunk = r.raw_data[2:]
+        if not chunk:
+            break
+        body += chunk
+        end = body.find(b"\x00")
+        if end >= 0:
+            body = body[:end]
+            break
     try:
-        return True, json.loads((body[:end] if end >= 0 else body).decode())
+        return True, json.loads(body.decode())
     except Exception:
-        return True, {"_unparsed_bytes": len(body)}
+        return True, {"_unparsed_bytes": len(body), "_head": body[:80].decode("utf-8", "replace")}
 
 
 def main():
@@ -162,7 +173,7 @@ def main():
             else "neither committed - upload path not understood, do not proceed"))
 
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    out = OUTDIR / "upload-capture-slot%d.json" % args.slot
+    out = OUTDIR / f"upload-capture-slot{args.slot}.json"
     out.write_text(json.dumps({
         "device": "EP-133 TE032AS001 OS 2.5.1",
         "source_wav": "fixtures/phase0-test-tone.wav (synthesised, no third-party rights)",

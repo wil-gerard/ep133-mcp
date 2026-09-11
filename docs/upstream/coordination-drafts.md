@@ -63,6 +63,29 @@ offset 2 as `midiChannel`. My library has slots up to 935, and reading offsets
 offset 2 looks like the slot's high byte on this firmware. Note `PadSpec` already
 documents `sample_slot` as "uint16 LE", which agrees.
 
+## ZacharySBrown/ep133-ppak — third item (answers our own earlier question)
+
+The first draft above asks whether FILE_INFO is required to commit an upload. We
+have now answered it on hardware and should say so rather than ask: on
+TE032AS001 / OS 2.5.1, the empty-data terminator commits. Probing the target slot
+between the terminator and FILE_INFO, in one session, shows the slot already
+exists with full, correct metadata and free space already decremented; the
+subsequent FILE_INFO returns status 0 and changes nothing observable.
+
+So `upload_sample` works and its docstring is wrong — worth a one-line fix so
+nobody "repairs" a bug that is not there:
+
+> `slot` is the target library slot (1-based). FILE_INFO commits the uploaded
+> audio buffer to this slot — without it the device discards the upload.
+
+Still unverified by us: whether an upload without FILE_INFO survives a power
+cycle. Worth stating that limit in the report.
+
+Also useful and possibly undocumented: the slot metadata `crc` field is a plain
+CRC-32 of the raw PCM payload. We matched `zlib.crc32` exactly on a 37,500-byte
+upload, which makes post-install verification possible without reading the sample
+back. Happy to contribute that as a doc note if it is not already known.
+
 ## garrettjwilke/ep_133_sample_tool (check maintained fork first)
 
 Title: Confirm current capture and full-backup workflow for a sample-install integration
