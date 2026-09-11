@@ -2,6 +2,15 @@
 *.pak
 *.ppak
 
+# Downloaded reference audio and cut slices never belong here; fixtures are
+# synthesized WAVs and stay tracked.
+*.flac
+*.m4a
+*.mp3
+*.opus
+*.webm
+references/
+
 # Sanitized SysEx capture fixtures are intentionally NOT ignored;
 # scrub serial numbers and sample audio before committing one.
 

@@ -29,7 +29,7 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "install_sample", "install_kit", "undo_last_install"}
+                     "install_sample", "install_kit", "undo_last_install", "fetch_reference"}
 
 
 @pytest.mark.asyncio
@@ -40,6 +40,26 @@ async def test_server_status_never_opens_the_port():
             status = _payload(await session.call_tool("server_status"))
     assert status["session_open"] is False
     assert status["write_tools_available"] is True
+    assert set(status["audio"]) == {"extra_installed", "missing_modules", "ffmpeg", "yt_dlp", "install"}
+
+
+def test_fetch_reference_without_audio_extra_is_structured(tmp_path, monkeypatch):
+    """Core install: the tool exists and refuses with the install command, never a traceback."""
+    import importlib.util
+    from ep133_mcp import server as module
+    from ep133_mcp.audio import deps
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name: None if name in deps.PYTHON_MODULES else real(name))
+    monkeypatch.setattr(deps, "which", lambda name: None)
+    wav = tmp_path / "ref.wav"
+    wav.write_bytes(b"RIFF")
+    result = module.fetch_reference(str(wav))
+    assert result["error"] == "AudioToolsUnavailable"
+    assert deps.EXTRA_INSTALL in result["next_step"]
+    assert module.fetch_reference("https://youtu.be/dQw4w9WgXcQ")["error"] == "AudioToolsUnavailable"
+    assert module.server_status()["audio"]["extra_installed"] is False
 
 
 def test_device_info_unavailable_is_structured(monkeypatch):

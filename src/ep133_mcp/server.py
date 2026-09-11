@@ -18,6 +18,8 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from . import __version__
+from .audio import deps as audio_deps
+from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.install import Installer
@@ -196,10 +198,32 @@ def undo_last_install() -> dict[str, Any]:
 
 
 @server.tool(
+    name="fetch_reference",
+    description=(
+        "Fetch a section of a song as a local 44.1 kHz 16-bit PCM WAV clip for "
+        f"analysis (max {MAX_CLIP_SECONDS:.0f} s). Accepts a YouTube URL, a Spotify track "
+        "link (title via Spotify oEmbed, then a YouTube search; the chosen video is "
+        "reported — pass a YouTube URL to override), or a local file path/URL. No device "
+        "I/O. Needs the audio extra plus ffmpeg and yt-dlp; returns AudioToolsUnavailable "
+        "with the install command otherwise. Clips are cached under the state directory "
+        "with a source.json naming the URL and time range. Clips and kits cut from them "
+        "are for the owner's own device and personal use; nothing is published."
+    ),
+)
+def fetch_reference(url: str, start_s: float = 0.0, end_s: float | None = None) -> dict[str, Any]:
+    try:
+        return _fetch_reference(url, start_s, end_s)
+    except DeviceError as e:
+        log.warning("fetch_reference failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
     name="server_status",
     description=(
-        "Report this server's version and whether an EP-133 MIDI port is visible, "
-        "without opening it. Safe to call when no device is attached."
+        "Report this server's version, whether an EP-133 MIDI port is visible "
+        "(without opening it), and whether the optional audio extra, ffmpeg and "
+        "yt-dlp are available. Safe to call when no device is attached."
     ),
 )
 def server_status() -> dict[str, Any]:
@@ -213,6 +237,7 @@ def server_status() -> dict[str, Any]:
         "device_input_visible": any("EP-133" in n for n in ins),
         "session_open": _session is not None,
         "write_tools_available": True,
+        "audio": audio_deps.probe(),
     }
 
 

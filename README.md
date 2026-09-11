@@ -48,10 +48,31 @@ For a client supporting `mcpServers`, replace the path with your checkout:
 | `install_kit` | Preflight 1–12 entries, then apply sequentially; partial failure is possible |
 | `undo_last_install` | Revert unchanged journalled assignments; uploaded slots remain |
 | `restore_procedure` | Manual restore and verification guidance; no device writes |
+| `fetch_reference` | Cache a ≤60 s section of a song (YouTube, Spotify track or local file) as a 44.1 kHz WAV; needs the `audio` extra |
 
 Pad numbers are visual indices from top left to bottom right: 1 is labelled
 `7`, 7 is labelled `1`, 10 is `.`, and 12 is `ENTER`. Projects are 1–9; groups
 are uppercase A–D. Use `list_pads` to inspect the destination.
+
+## Reference audio (optional)
+
+The reference-song pipeline (`fetch_reference`, with analysis and kit
+extraction to follow) lives behind an optional extra plus `ffmpeg`:
+
+```sh
+uv sync --extra dev --extra audio
+brew install ffmpeg
+```
+
+`server_status` reports whether the extra, `ffmpeg` and `yt-dlp` are present;
+without them the tools return `AudioToolsUnavailable` with the install command.
+Spotify links resolve through Spotify's public oEmbed title (plus the track
+page's artist when readable) to a YouTube search; the chosen video is reported
+so you can pass a YouTube URL instead. Clips are cached under
+`~/.local/state/ep133-mcp/references/` (override with `EP133_REFERENCES_DIR`)
+with a `source.json` naming the URL and time range. They are for your own
+device and personal use; nothing is published and nothing under that directory
+belongs in this repository.
 
 ## A sample-to-kit walkthrough
 
