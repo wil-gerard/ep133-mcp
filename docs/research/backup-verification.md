@@ -192,7 +192,15 @@ Still open:
 - Lossiness is unverified. The archive holds 44.1 kHz WAVs while the device
   reports `samplerate.native` 46875, so whether a restore round-trip is
   bit-exact on audio is untested — pad metadata is what was checked here.
-- The exact Sample Tool click-path is not yet written down.
+- Replace-vs-merge is still undetermined (see above); the confirmation dialog's
+  wording suggests replace, but wording is not evidence.
+
+### Restore procedure (as performed)
+
+In EP Sample Tool: **backup and restore → restore local backup**, pick the
+`.pak`, then confirm the "are you sure? potentially overwriting content" prompt.
+That prompt is the only destructive gate, so a restore is one misclick away —
+any tooling we build must never automate past it.
 
 ## What this does and does not establish
 

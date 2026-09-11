@@ -14,41 +14,54 @@ Which protocol sections should an integration treat as current, and which hardwa
 
 ## ZacharySBrown/ep133-ppak — second issue (hardware-verified, ready to file)
 
-Title: PROTOCOL.md §3 TAR↔SysEx pad translation table appears to be wrong
+Title: PROTOCOL.md §3.1 project-TAR pad numbering contradicts the library's own
+song builder
 
-Drafted 2026-09-09 from hardware evidence. See
-[backup verification](../research/backup-verification.md) for the full data.
+Drafted 2026-09-09, re-audited 2026-09-10. See
+[backup verification](../research/backup-verification.md) for the data.
 
-PROTOCOL.md §3 states the project TAR is numbered bottom-up (`pads/c/p01` is the
-bottom-left pad, label ".") and gives a translation table mapping TAR `p01` to
-SysEx `pad_num` 10, `p04` to 7, and so on. On my unit that translation does not
-hold: the TAR uses the *same* numbering as `pad_num`.
+**This looks like a documentation bug, not a code bug.** `pad_file_id()`,
+`assign_pad()` and the `ep133/song` builders all appear correct; §3.1 is the
+part that does not match.
 
-Evidence, on an EP-133 SKU TE032AS001, OS 2.5.1:
+§3.1 says the project TAR is numbered bottom-up — `p01` = "." (bottom-left),
+`p04` = "1" — and gives a translation table mapping TAR `pNN` to a *different*
+SysEx `pad_num`. On my unit the TAR uses the **same** numbering as `pad_num`,
+so the translation is an identity and the table is a row-reversal that should
+not be applied.
 
-1. Reading `sym` from all 432 pad metadata nodes and comparing against the slot
-   ids decoded from the project TARs of a Sample Tool backup taken minutes
-   earlier: node suffix `NN` matched TAR `pNN` with 369 exact agreements, 63
-   explained by slots deleted from the library, and 0 unexplained. Applying the
-   §3 row-reversal instead left 118 pads unexplained.
-2. Two single-pad `FILE_METADATA_SET {"sym":14}` writes: node 7204 loaded the pad
-   physically labelled "4", node 7207 loaded the pad labelled "1". Both agree
-   with the §3 `pad_num` table, so `pad_file_id()` and `assign_pad()` are right.
+Three independent lines of evidence, on EP-133 SKU TE032AS001, OS 2.5.1:
 
-Together those give TAR `p04` = pad_num 4 = physical "4", where §3's table says
-TAR `p04` = pad_num 7 = physical "1". If that is right, code applying the
-documented translation while patching a `.ppak` places every pad in the wrong
-row — which is exactly the failure §3 warns about, in the opposite direction.
+1. **Your own song builder agrees with me.** `ep133/song/format.py` takes
+   `PadSpec.pad` 1..12 and writes it straight to `pads/{group}/p{NN}` with no
+   translation, and the comment at `build_pattern` states the reference has the
+   "." pad stored at `pads/{group}/p10`. §3.1's table says "." is `p01`. Since
+   "." is `pad_num` 10, `p10` = `pad_num` 10 — TAR numbering equals `pad_num`.
+   `tests/test_song_format.py::test_build_pattern_pad_indicator_is_pad_minus_one_times_8`
+   encodes the same reference.
 
-Two caveats I cannot resolve alone: this is one unit on one OS, and I verified
-*reading* a Sample Tool export, not what the device does when *importing* a
-hand-built `.ppak`. It is possible export and import differ, or that the table
-describes an older Sample Tool version. Happy to run specific checks.
+2. **432-pad read comparison.** Reading `sym` from every pad metadata node and
+   comparing against slot ids decoded from the project TARs of a Sample Tool
+   backup taken minutes earlier: node suffix `NN` matched TAR `pNN` with 369
+   exact agreements, 63 explained by slots deleted from the library, and 0
+   unexplained. Applying §3.1's row-reversal instead left 118 unexplained.
+
+3. **Two single-pad writes.** `FILE_METADATA_SET {"sym":14}` to node 7204 loaded
+   the pad physically labelled "4"; to node 7207 it loaded the pad labelled "1".
+   Both match §3's `pad_fid` formula and the `pad_num` table, which are correct.
+
+What I have not established: this is one unit on one OS; and evidence (2) and (3)
+verify *reading* device metadata and *reading* a Sample Tool export. Evidence (1)
+is from your import-side builder, which is consistent, but I have not personally
+round-tripped a hand-built `.ppak` through import to confirm the device agrees
+there. It is also possible §3.1 documents an older Sample Tool version. Happy to
+run specific checks on request.
 
 Separately, and lower confidence: §7 lists pad-record offset 1 as `slot u8` with
 offset 2 as `midiChannel`. My library has slots up to 935, and reading offsets
 1–2 as u16 LE resolves every occupied pad to a slot the device confirms, so
-offset 2 looks like the slot's high byte on this firmware.
+offset 2 looks like the slot's high byte on this firmware. Note `PadSpec` already
+documents `sample_slot` as "uint16 LE", which agrees.
 
 ## garrettjwilke/ep_133_sample_tool (check maintained fork first)
 
