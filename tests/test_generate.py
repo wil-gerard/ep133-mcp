@@ -173,3 +173,45 @@ def test_acceptance_fixture_groove_to_ppak(tmp_path, capsys):
     assert enc.decode_scene(files["scenes"], 1) == {"A": 1, "B": 2, "C": 1, "D": 1, "num": 4, "den": 4}
     decoded = pattern_decode.decode_pattern(files["patterns/b02"])
     assert decoded["bars"] == record["bars"] and all(e["note"] == 60 and e["vel"] == 100 and e["dur"] == 24 for e in decoded["events"])
+
+
+def test_add_events_keeps_existing_bytes():
+    existing = bytes([0, 1, 2, 0]) + struct.pack("<HBBBHB", 48, (3 - 1) << 3, 62, 100, 30, 6) + struct.pack("<HBBBHB", 96, 0, 60, 100, 24, 8)
+    grown = enc.add_events(existing, [(7, 2), (1, 0)])
+    assert grown[:4] == bytes([0, 1, 4, 0]) and len(grown) == 4 + 8 * 4
+    events = enc.decode_pattern(grown)["events"]
+    assert [(e["pos"], e["pad"], e["byte7"]) for e in events] == [(0, 1, 0), (48, 3, 6), (48, 7, 0), (96, 1, 8)]
+    assert existing[4:12] in grown and existing[12:20] in grown            # device-written events untouched, byte 7 included
+    for bad in ([(0, 0)], [(13, 0)], [(1, 16)], [(1, -1)]):
+        with pytest.raises(ValueError):
+            enc.add_events(existing, bad)
+    with pytest.raises(ValueError):
+        enc.add_events(enc.encode_pattern(2, {p: "x" * 32 for p in range(1, 8)}) , [(1, 0)] * 40)
+
+
+def test_patch_project_add_form():
+    files = minimal_project()
+    files["patterns/a01"] = bytes([0, 1, 1, 0]) + struct.pack("<HBBBHB", 0, 6 << 3, 60, 100, 24, 6)
+    tar, manifest = G.patch_project(P.pack_project(files), patterns=[{"group": "A", "index": 1, "add": [{"pad": 7, "step": 8}]}])
+    assert manifest == [{"member": "patterns/a01", "action": "extended", "bytes_before": 12, "bytes": 20, "events_added": 1,
+                         "ranges": [{"offset": 2, "length": 1, "before": "01", "after": "02"}]}]
+    grown = P.unpack_project(tar)["patterns/a01"]
+    assert grown[:4] == bytes([0, 1, 2, 0]) and grown[4:12] == files["patterns/a01"][4:]
+    assert grown[12:] == struct.pack("<HBBBHB", 192, 6 << 3, 60, 100, 24, 0)
+    for bad in ([{"group": "A", "index": 9, "add": [{"pad": 7, "step": 8}]}],
+                [{"group": "A", "index": 1, "add": []}],
+                [{"group": "A", "index": 1, "add": [{"pad": 7}]}],
+                [{"group": "A", "index": 1, "bars": 1, "add": [{"pad": 7, "step": 8}]}],
+                [{"group": "A", "index": 1, "add": [{"pad": 7, "step": 8}]}, {"group": "A", "index": 1, "bars": 1, "steps": {"1": "x" * 16}}]):
+        with pytest.raises(G.GenerateError):
+            G.patch_project(P.pack_project(files), patterns=bad)
+
+
+def test_generate_ppak_add_form_response(tmp_path):
+    files = minimal_project()
+    files["patterns/a01"] = bytes([0, 1, 1, 0]) + struct.pack("<HBBBHB", 0, 6 << 3, 60, 100, 24, 6)
+    result = G.generate_ppak(P.pack_project(files), 5, tmp_path / "add.ppak", META,
+                             patterns=[{"group": "A", "index": 1, "add": [{"pad": 7, "step": 8}]}])
+    assert result["patterns_written"] == {"patterns/a01": {"events": 2, "added": [{"pad": 7, "step": 8}]}}
+    assert result["velocity"] is None
+    assert pattern_decode.cmd_check(pattern_decode.load_projects(str(tmp_path / "add.ppak"))) == 0

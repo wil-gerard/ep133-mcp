@@ -143,3 +143,27 @@ def patch_pad_record(record: bytes, slot: int, frames: int) -> bytes:
     struct.pack_into("<H", out, 1, slot)
     struct.pack_into("<I", out, 8, frames)
     return bytes(out)
+
+
+def add_events(data: bytes, hits: list[tuple[int, int]]) -> bytes:
+    """Append note events at (pad, step) to an existing pattern file, keeping every existing byte.
+
+    New events are inserted after any existing event at the same tick (recording order) and
+    the header count is bumped; bars and all other bytes are untouched."""
+    decoded = decode_pattern(data)
+    length = decoded["bars"] * STEPS_PER_BAR
+    new = []
+    for pad, step in hits:
+        if type(pad) is not int or not 1 <= pad <= 12:
+            raise ValueError(f"pad must be 1..12: {pad!r}")
+        if type(step) is not int or not 0 <= step < length:
+            raise ValueError(f"step must be 0..{length - 1} for a {decoded['bars']}-bar pattern: {step!r}")
+        new.append((step * TICKS_PER_STEP, pad))
+    if len(decoded["events"]) + len(new) > MAX_EVENTS:
+        raise ValueError(f"pattern would hold more than {MAX_EVENTS} events")
+    existing = [data[off:off + EVENT_SIZE] for off in range(PATTERN_HEADER, len(data), EVENT_SIZE)]
+    merged = [(struct.unpack_from("<H", raw)[0], 0, i, raw) for i, raw in enumerate(existing)]
+    merged += [(pos, 1, i, struct.pack("<HBBBHB", pos, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, VELOCITY_BYTE,
+                                       STEP_DURATION, 0)) for i, (pos, pad) in enumerate(sorted(new))]
+    merged.sort(key=lambda item: item[:3])
+    return bytes([data[0], decoded["bars"], len(merged), data[3]]) + b"".join(raw for *_, raw in merged)

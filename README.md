@@ -2,7 +2,7 @@
 
 An MCP server that installs samples onto a Teenage Engineering EP-133 K.O. II.
 
-Development build: `0.1.0.dev0`. All eight tools are implemented and tested
+Development build: `0.1.0.dev0`. All thirteen tools are implemented and tested
 offline. The upload protocol has passed hardware and power-cycle checks;
 **the new server's install/kit/undo workflow still needs hardware acceptance**.
 See [release evidence](docs/research/phase1-validation.md).
@@ -49,6 +49,10 @@ For a client supporting `mcpServers`, replace the path with your checkout:
 | `undo_last_install` | Revert unchanged journalled assignments; uploaded slots remain |
 | `restore_procedure` | Manual restore and verification guidance; no device writes |
 | `fetch_reference` | Cache a ≤60 s section of a song (YouTube, Spotify track or local file) as a 44.1 kHz WAV; needs the `audio` extra |
+| `analyze_reference` | Tempo, key, downbeat and per-stem onsets for a clip (demucs + Beat This!, with HPSS + librosa fallbacks); every estimate is probable |
+| `extract_kit` | Up to 12 one-shots cut from the clip's stems as 46875 Hz mono 16-bit WAVs, with an `install_mapping` for `install_kit` |
+| `transcribe_groove` | The clip's drums as `x`/`.` strings per kit pad on a 16th grid, in the shape `generate_ppak` takes |
+| `generate_ppak` | Patch a device-written project (BPM, pads, patterns, scenes) into a `.ppak` for Sample Tool import; no device writes |
 
 Pad numbers are visual indices from top left to bottom right: 1 is labelled
 `7`, 7 is labelled `1`, 10 is `.`, and 12 is `ENTER`. Projects are 1–9; groups
@@ -56,8 +60,8 @@ are uppercase A–D. Use `list_pads` to inspect the destination.
 
 ## Reference audio (optional)
 
-The reference-song pipeline (`fetch_reference`, with analysis and kit
-extraction to follow) lives behind an optional extra plus `ffmpeg`:
+The reference-song pipeline (`fetch_reference`, `analyze_reference`,
+`extract_kit`, `transcribe_groove`) lives behind an optional extra plus `ffmpeg`:
 
 ```sh
 uv sync --extra dev --extra audio
@@ -66,6 +70,8 @@ brew install ffmpeg
 
 `server_status` reports whether the extra, `ffmpeg` and `yt-dlp` are present;
 without them the tools return `AudioToolsUnavailable` with the install command.
+The first `analyze_reference` downloads the demucs weights (HuggingFace cache)
+and the Beat This! checkpoint (torch hub cache) once; tests never do.
 Spotify links resolve through Spotify's public oEmbed title (plus the track
 page's artist when readable) to a YouTube search; the chosen video is reported
 so you can pass a YouTube URL instead. Clips are cached under

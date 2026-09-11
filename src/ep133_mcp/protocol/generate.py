@@ -24,6 +24,7 @@ from .projects import (build_ppak, pack_project, project_meta, read_pak, referen
 
 PAD_FIELDS = {"group", "pad", "slot", "frames"}
 PATTERN_FIELDS = {"group", "index", "bars", "steps"}
+PATTERN_ADD_FIELDS = {"group", "index", "add"}
 SCENE_FIELDS = {"scene", "A", "B", "C", "D"}
 VELOCITY_NOTE = ("'o' steps are encoded exactly like 'x' (note 60, byte 4 = 100): the device has never "
                  "been seen to store any other velocity, so softer hits are not expressible yet.")
@@ -67,6 +68,7 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
         raise GenerateError("template TAR is not in the device's own flavour; take it from a backup or a live read")
     original = dict(files)
     manifest: list[dict] = []
+    extended: set[str] = set()
     try:
         if bpm is not None:
             if "settings" not in files:
@@ -80,6 +82,21 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
             files[name] = enc.patch_pad_record(files[name], item["slot"], item["frames"])
         seen = set()
         for item in patterns or []:
+            if isinstance(item, dict) and "add" in item:
+                _require_fields(item, PATTERN_ADD_FIELDS, "patterns (add form)")
+                name = enc.pattern_member(item["group"], item["index"])
+                if name in seen:
+                    raise GenerateError(f"pattern {name} given twice")
+                seen.add(name)
+                if name not in files:
+                    raise GenerateError(f"pattern {name} does not exist in the template; use the steps form to create it")
+                hits = item["add"]
+                if not isinstance(hits, list) or not hits or not all(
+                        isinstance(h, dict) and set(h) == {"pad", "step"} for h in hits):
+                    raise GenerateError(f"add for {name} must be a non-empty list of {{pad, step}}")
+                files[name] = enc.add_events(files[name], [(h["pad"], h["step"]) for h in hits])
+                extended.add(name)
+                continue
             _require_fields(item, PATTERN_FIELDS, "patterns")
             name = enc.pattern_member(item["group"], item["index"])
             if name in seen:
@@ -109,6 +126,10 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
         entry = {"member": name}
         if before is None:
             entry.update(action="added", bytes=len(after))
+        elif name in extended:
+            entry.update(action="extended", bytes_before=len(before), bytes=len(after),
+                         events_added=(len(after) - len(before)) // enc.EVENT_SIZE,
+                         ranges=_ranges(before[:enc.PATTERN_HEADER], after[:enc.PATTERN_HEADER]))
         elif name.startswith("patterns/"):
             dropped = enc.decode_pattern(before)["events"]
             entry.update(action="replaced", bytes_before=len(before), bytes=len(after),
@@ -137,16 +158,20 @@ def generate_ppak(template: bytes, project: int, out: str | Path, meta: dict, *,
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(data)
     decoded = {}
+    written = unpack_project(tar)
     for item in patterns or []:
         name = enc.pattern_member(item["group"], item["index"])
-        decoded[name] = {str(pad): row for pad, row in
-                         enc.pattern_steps(unpack_project(tar)[name]).items()}
+        if "add" in item:
+            decoded[name] = {"events": len(enc.decode_pattern(written[name])["events"]),
+                             "added": [dict(h) for h in item["add"]]}
+        else:
+            decoded[name] = {str(pad): row for pad, row in enc.pattern_steps(written[name]).items()}
     return {
         "status": "written", "ppak": str(out), "bytes": len(data), "project": project,
         "tar_bytes": len(tar), "template_bytes": len(template), "manifest": manifest,
         "patterns_written": decoded, "sounds_included": sorted(chosen),
         "velocity": VELOCITY_NOTE if any(
-            enc.SOFT_HIT in row for item in patterns or [] for row in item["steps"].values()) else None,
+            enc.SOFT_HIT in row for item in patterns or [] for row in item.get("steps", {}).values()) else None,
         "instruction": (f"Import {out.name} with Sample Tool into project {project}, which must not be the active "
                         "project. Take a full backup first. If the device rejects the file, do not power-cycle "
                         "before writing up what happened."),
