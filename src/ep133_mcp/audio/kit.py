@@ -4,8 +4,10 @@ Drums: every onset on the drums stem gets three features over its first
 FEATURE_WINDOW_S (spectral centroid, spectral flatness, low-band energy
 ratio), z-scored and clustered with k-means (k=3). Clusters are named by
 centroid order: lowest = kick, middle = snare, highest = hat. The exemplar per
-class is the onset with the highest onset strength weighted by its gap to the
-next onset, so the slice is as clean as the clip allows. `perc` slots take the
+class is the member closest to the cluster centre in feature space, among those
+at least as loud and with at least as much room as the cluster median, so the
+one sample every hit of that class fires is typical of the class and still as
+clean as the clip allows. `perc` slots take the
 member of any cluster that is farthest in feature space from its exemplar,
 when that distance is large enough to be a different sound (open vs closed
 hat, rim vs snare); otherwise they stay unfilled and say so.
@@ -146,9 +148,26 @@ def _gaps(onsets: list[float], duration: float):
     return np.diff(times)
 
 
-def pick_exemplar(members: list[int], strength: list[float], gaps) -> int:
-    """Highest onset strength, discounted when the next onset would cut the slice short."""
-    return max(members, key=lambda i: (strength[i] * min(float(gaps[i]), MAX_SLICE_S) / MAX_SLICE_S, strength[i]))
+def pick_exemplar(members: list[int], strength: list[float], gaps, features=None) -> int:
+    """The most typical member of the cluster, among those loud enough and with room for a slice.
+
+    Ranking purely by strength and gap picks the loudest hit with the longest tail - usually the
+    last hit before a rest, which on real material is often the least representative sound in the
+    cluster (a dark snare that reads as a kick, an open hat among closed ones). Every onset the
+    class fires plays this one sample, so it has to be typical first and clean second."""
+    import numpy as np
+
+    def cleanest(candidates):
+        return max(candidates, key=lambda i: (strength[i] * min(float(gaps[i]), MAX_SLICE_S) / MAX_SLICE_S,
+                                              strength[i]))
+
+    if features is None or len(members) < 3:
+        return cleanest(members)
+    z = _zscore(np.asarray(features, dtype=np.float64))
+    centre = z[members].mean(axis=0)
+    distance = {i: float(np.linalg.norm(z[i] - centre)) for i in members}
+    typical = [i for i in members if distance[i] <= np.median(list(distance.values()))]
+    return cleanest(typical or members)
 
 
 def perc_candidates(features, clusters: dict[str, list[int]], exemplars: dict[str, int]) -> list[tuple[float, int, str]]:
@@ -272,7 +291,7 @@ def extract_kit(clip: str | Path, want=None, separation: str = "auto", beat_trac
         features = drum_features(drums["audio"], drums["sr"], drums["starts_s"])
         clusters = cluster_drums(features)
         for name, members in clusters.items():
-            exemplars[name] = pick_exemplar(members, drums["strength"], drums["gaps"])
+            exemplars[name] = pick_exemplar(members, drums["strength"], drums["gaps"], features)
             chosen[name].append((exemplars[name], {"cluster": name}))
         for distance, i, name in perc_candidates(features, clusters, exemplars):
             chosen["perc"].append((i, {"cluster": name, "distance_from_exemplar": round(distance, 2)}))

@@ -105,3 +105,22 @@ def test_cluster_degenerate_cases():
     assert kit.cluster_drums(np.array([[300.0, 0.2, 0.7]])) == {'kick': [0]}
     two = kit.cluster_drums(np.array([[300.0, 0.2, 0.7], [9000.0, 0.6, 0.0], [300.0, 0.2, 0.7]]))
     assert two == {'kick': [0, 2], 'hat': [1]}
+
+
+def test_exemplar_avoids_timbral_outliers():
+    """The loudest hit with the longest tail is often the least typical sound of its class.
+
+    Every onset of a class fires this one sample, so a snare cluster whose loudest member is a
+    dark thud makes the whole transcription read as kicks. Found on a real breakbeat."""
+    import numpy as np
+    from ep133_mcp.audio.kit import pick_exemplar
+
+    members = [0, 1, 2, 3]
+    features = np.array([[2300.0, 0.2, 0.2],      # typical
+                         [2400.0, 0.2, 0.2],      # typical
+                         [2350.0, 0.2, 0.2],      # typical
+                         [1100.0, 0.2, 0.7]])     # outlier: dark, loud, long tail
+    strength = [0.5, 0.6, 0.4, 0.99]
+    gaps = [0.3, 0.3, 0.3, 1.0]
+    assert pick_exemplar(members, strength, gaps, features) in (0, 1, 2)   # never the dark outlier
+    assert pick_exemplar(members, strength, gaps) == 3          # which the old strength/gap rule picks
