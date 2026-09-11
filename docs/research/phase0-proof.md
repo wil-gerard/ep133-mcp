@@ -89,10 +89,24 @@ after the power cycle, so whatever happened reached flash.
 The backup stores slot field 341 at `P05/a/p04`, so 14 did not come from the
 restored record.
 
-Working hypothesis, **not confirmed**: project 5 is the active project and the
-device holds it in RAM; the restore wrote flash, our verification read the
-restored flash, and a later flush wrote the stale RAM copy back over it. Project
-6 is not active, which would explain why it behaved differently.
+**Refined hypothesis, 2026-09-10 — the restore was probably still in flight when
+we verified it.** A pad reads `sym` = 0 whenever its stored slot field points at
+a slot that does not exist. If Sample Tool restores projects and sounds in
+separate phases, then during the window where project records were written but
+the sound library was not yet complete, a pad holding slot 14 would read 0 simply
+because slot 14 did not exist *yet*. Our verification ran immediately after the
+owner said the restore had finished, which is exactly that window.
+
+That would mean the restore never reverted node 7204's stored field at all — it
+still holds the 14 we wrote — and the `7204=0` PASS was an artifact of reading
+mid-restore rather than evidence of reversion.
+
+This fits better than the earlier RAM-flush guess, which could not explain why
+7204 drifted while 7207, written and restored identically, did not. Under the
+in-flight reading, 7207 differs because we later overwrote it with slot 16
+deliberately, so its stored field was never expected to match the backup.
+
+Neither hypothesis is confirmed.
 
 If that is right, then **restoring a backup does not reliably revert the active
 project**, and the restore result in
@@ -101,6 +115,25 @@ it was verified immediately after the restore, which is exactly when this
 hypothesis says the reading would still look correct. Recovery may require a
 power cycle before verification, or restoring while a different project is
 active.
+
+### How to settle it
+
+The device does not expose stored pad-record bytes — `FILE_METADATA_GET` returns
+the resolved `sym`, so a stale reference and a genuinely empty pad are
+indistinguishable live. The stored field is only visible in a backup.
+
+So: take a **fresh backup now** and diff its `P05/a/p04` record against the
+2026-09-09 backup with [`tools/diff_backups.py`](../../tools/diff_backups.py).
+
+- Stored slot **341** → the restore did revert the record, and something later
+  re-wrote 14. The RAM-flush hypothesis survives.
+- Stored slot **14** → the restore never reverted this pad, and our verification
+  passed because it ran before the sound library finished restoring. Restore is
+  not atomic, and verifying one immediately after it reports "done" is unsound.
+
+The second outcome is the more serious one: it would mean our restore
+verification method is wrong, not just that one pad drifted. Any future restore
+check must power-cycle first, or at minimum re-verify after a delay.
 
 This needs resolving before any tool advertises restore as a safety net. It does
 not affect the Phase 0 result above, which was verified across a power cycle.
