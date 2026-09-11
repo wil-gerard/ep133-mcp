@@ -79,64 +79,68 @@ An earlier revision of this document claimed writing `active` does not switch
 projects at all. That was wrong — it was written before the power-cycle test,
 from the live-write result alone.
 
-## Unresolved: node 7204 drifted back after a verified restore
+## Resolved: the restore did not revert node 7204, and our check could not have seen it
 
-Node 7204 was set to slot 14 during the pad-addressing tests. The restore
-reverted it — verified explicitly, `7204=0`, 0 unexplained across 432 pads. With
-no further write to that node, it later read 14 again, and it still reads 14
-after the power cycle, so whatever happened reached flash.
+Node 7204 was set to slot 14 during the pad-addressing tests. The restore was
+verified immediately afterwards — `7204=0`, 0 unexplained across 432 pads — and
+that check passed. Later the node read 14 again, and persisted through a power
+cycle.
 
-The backup stores slot field 341 at `P05/a/p04`, so 14 did not come from the
-restored record.
+A fresh backup taken 2026-09-10 settles it. Diffing pad records against the
+2026-09-09 backup with [`tools/diff_backups.py`](../../tools/diff_backups.py):
 
-**Refined hypothesis, 2026-09-10 — the restore was probably still in flight when
-we verified it.** A pad reads `sym` = 0 whenever its stored slot field points at
-a slot that does not exist. If Sample Tool restores projects and sounds in
-separate phases, then during the window where project records were written but
-the sound library was not yet complete, a pad holding slot 14 would read 0 simply
-because slot 14 did not exist *yet*. Our verification ran immediately after the
-owner said the restore had finished, which is exactly that window.
+```
+P05/a/p04 (node 7204)
+  2026-09-09 backup: slot=341  len=0        (the state the restore should have written)
+  2026-09-10 backup: slot=14   len=470400   (our write, never reverted)
+```
 
-That would mean the restore never reverted node 7204's stored field at all — it
-still holds the 14 we wrote — and the `7204=0` PASS was an artifact of reading
-mid-restore rather than evidence of reversion.
+**The restore did not revert this record.** The stored slot field is the 14 we
+wrote, not the 341 in the backup being restored. Everything else across all nine
+projects is byte-identical to the old backup except node 7207 (which we later
+assigned deliberately) and project 5's `scenes` file (which we never touched —
+see below).
 
-This fits better than the earlier RAM-flush guess, which could not explain why
-7204 drifted while 7207, written and restored identically, did not. Under the
-in-flight reading, 7207 differs because we later overwrote it with slot 16
-deliberately, so its stored field was never expected to match the backup.
+### Why the verification passed anyway
 
-Neither hypothesis is confirmed.
+A live `FILE_METADATA_GET` returns the *resolved* `sym`, not the stored slot
+field. A stored id whose slot does not currently exist reads as 0 — exactly like
+an empty pad. So at the moment we verified, node 7204 resolved to 0 despite
+holding 14, and the check treated that as proof of reversion. **It was not.**
+The most likely reason it resolved to 0 at that instant is that the sound
+library had not finished restoring, so slot 14 did not yet exist; it read 14
+again once it did.
 
-If that is right, then **restoring a backup does not reliably revert the active
-project**, and the restore result in
-[backup-verification.md](backup-verification.md) is weaker than stated there —
-it was verified immediately after the restore, which is exactly when this
-hypothesis says the reading would still look correct. Recovery may require a
-power cycle before verification, or restoring while a different project is
-active.
+That means the method was unsound, not just one pad unlucky. **A restore cannot
+be verified by reading `sym` over SysEx.** The only sound check is to take a
+fresh backup after the restore and diff the pad records against the backup that
+was restored.
 
-### How to settle it
+### What is still not explained
 
-The device does not expose stored pad-record bytes — `FILE_METADATA_GET` returns
-the resolved `sym`, so a stale reference and a genuinely empty pad are
-indistinguishable live. The stored field is only visible in a backup.
+Node 7207 was written to 14 in the same session, restored the same way, and read
+0 afterwards *and* stayed 0 until we deliberately assigned 16 to it. So the
+restore reverted one of two identically-treated pads. No mechanism for that has
+been established. Candidates: the restore skipping records that match some
+cached state, or the active project being re-flushed from RAM after the restore
+in a way that happened to cover one pad. Do not build on either.
 
-So: take a **fresh backup now** and diff its `P05/a/p04` record against the
-2026-09-09 backup with [`tools/diff_backups.py`](../../tools/diff_backups.py).
+Project 5's `scenes` file also changed between the two backups with no write
+from us. The device rewrites the active project on its own; treat any
+byte-level expectation about the active project as unstable while the device is
+running.
 
-- Stored slot **341** → the restore did revert the record, and something later
-  re-wrote 14. The RAM-flush hypothesis survives.
-- Stored slot **14** → the restore never reverted this pad, and our verification
-  passed because it ran before the sound library finished restoring. Restore is
-  not atomic, and verifying one immediately after it reports "done" is unsound.
+### Consequences
 
-The second outcome is the more serious one: it would mean our restore
-verification method is wrong, not just that one pad drifted. Any future restore
-check must power-cycle first, or at minimum re-verify after a delay.
-
-This needs resolving before any tool advertises restore as a safety net. It does
-not affect the Phase 0 result above, which was verified across a power cycle.
+- The "Restore, demonstrated" section of
+  [backup-verification.md](backup-verification.md) is downgraded: restore
+  reverts *most* state, and we have one confirmed case where it did not revert
+  the active project's pad record. It is **not yet a proven safety net** for
+  destructive operations on the active project.
+- Restore verification must be by backup diff, never by live read.
+- Until this is understood, tools that modify the active project should
+  recommend the user switch projects first, and every restore should be
+  followed by a fresh backup and a diff before the device is considered clean.
 
 ## Device state left behind
 

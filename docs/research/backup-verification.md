@@ -160,12 +160,14 @@ resolved.
 
 ## Restore, demonstrated
 
-> **Caveat added 2026-09-10.** A pad this restore reverted later drifted back to
-> its pre-restore value and persisted across a power cycle. The restore may not
-> reliably revert the *active* project, and the verification below ran
-> immediately after the restore — exactly when that failure would still look
-> correct. See [phase0-proof.md](phase0-proof.md). Treat the result below as
-> demonstrated for non-active projects and unconfirmed for the active one.
+> **Downgraded 2026-09-10.** A backup diff proves this restore did **not** revert
+> node 7204 — its stored record still holds the slot we wrote, not the backed-up
+> value. The verification below passed because a live `sym` read resolves a
+> stale slot id to 0, indistinguishable from an empty pad, and the sound library
+> was probably still restoring at that instant. **Live reads cannot verify a
+> restore; only a post-restore backup diff can.** Restore reverts most state and
+> is still the recovery path, but it is not yet a proven safety net for the
+> active project. Full analysis in [phase0-proof.md](phase0-proof.md).
 
 Restore was demonstrated on 2026-09-09 against a real, deliberate difference.
 Two pads in project 5 (nodes 7204 and 7207) had been set to slot 14 by the
