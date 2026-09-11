@@ -160,6 +160,13 @@ resolved.
 
 ## Restore, demonstrated
 
+> **Caveat added 2026-09-10.** A pad this restore reverted later drifted back to
+> its pre-restore value and persisted across a power cycle. The restore may not
+> reliably revert the *active* project, and the verification below ran
+> immediately after the restore — exactly when that failure would still look
+> correct. See [phase0-proof.md](phase0-proof.md). Treat the result below as
+> demonstrated for non-active projects and unconfirmed for the active one.
+
 Restore was demonstrated on 2026-09-09 against a real, deliberate difference.
 Two pads in project 5 (nodes 7204 and 7207) had been set to slot 14 by the
 authorized pad-addressing writes above; the device therefore differed from the
