@@ -33,8 +33,8 @@ Phase 1 (`zmwcu8kp`):
 | `eya5iivi` device_info + list_pads | **done — device_info and list_pads hardware verified** |
 | `zjnizqio` backups + restore guidance | done — backup gate and guidance implemented |
 | `fazlbs50` preflight | done — WAV, aggregate memory, destination and safe slots |
-| `rbv6zfrx` install_sample | implemented and offline tested; hardware/power-cycle acceptance remains |
-| `8zru1ujl` install_kit, `fseydiaq` release | implementation, client tests and local builds ready; hardware acceptance remains |
+| `rbv6zfrx` install_sample | **done — shipped server installed, survived a power cycle, owner heard playback** (`phase1-smoke-test.md`) |
+| `8zru1ujl` install_kit, `fseydiaq` release | implementation, client tests and local builds ready; kit/undo hardware acceptance is a release gate |
 
 A **separate agent** is working `pblk0v4j` (pattern encoding, Phase 2) offline
 in `.claude/worktrees/pattern-encoding`, branch `research/pattern-encoding`.
@@ -102,10 +102,10 @@ preflight, confirmation, durable journalling, install and guarded undo.
 The full suite has 281 passing offline tests, including real MCP client
 round trips with a fake device. Local wheel/source builds succeed.
 
-Follow [phase1-validation.md](../research/phase1-validation.md) for the
-remaining acceptance run. The new orchestrator has not touched hardware;
-Phase 0 evidence must not be relabelled as proof of this implementation.
-`rbv6zfrx`, `8zru1ujl` and `fseydiaq` remain open for that reason.
+The minimum smoke test in [phase1-validation.md](../research/phase1-validation.md)
+passed on 2026-09-10: one `install_sample` through the shipped server, power
+cycle, journal match, audible playback. `rbv6zfrx` is closed. `8zru1ujl` and
+`fseydiaq` stay open until kit and undo are exercised on hardware.
 
 Backups remain private and read-only. A new Sample Tool backup is required
 before the hardware run. The default maximum age is 24 hours. Undo leaves
@@ -114,12 +114,13 @@ faithfully restore; it does not claim full restoration.
 
 ## Device state right now
 
-Not the backed-up state. Slots 15 and 16 hold the test tone (15 is redundant).
-Project 5 pad "1" (node 7207) → slot 16, our proof. Project 5 pad "4" (7204) →
-slot 14, restore drift. Project 6 pads "1" and "4" armed by the stale-reference
+Not the backed-up state. Slots 15, 16 and 17 hold the test tone (15 is
+redundant). Project 5 group A pad "1" (node 7207) → slot 16, Phase 0 proof.
+Project 5 group D pad "1" (node 7507) → slot 17, Phase 1 smoke test, journal
+`c6035922…`. Project 5 pad "4" (7204) → slot 14, restore drift. Project 6 pads "1" and "4" armed by the stale-reference
 effect. The device was last on **project 4**. `FILE_DELETE` (`06 02 <fid>`) is
 documented but unverified, so nothing has been cleaned up. The 2026-09-11 backup
-captures this state exactly.
+predates slot 17 and is therefore stale; take a new one before any install.
 
 ## Open threads, not blocking
 

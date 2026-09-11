@@ -30,12 +30,14 @@ protocol implementation; they do **not** certify the new install orchestrator.
 See [phase0-proof.md](phase0-proof.md), [upload-capture.md](upload-capture.md),
 and [project-tar-read.md](project-tar-read.md).
 
-## Minimum smoke test to begin Phase 2 — in progress
+## Minimum smoke test to begin Phase 2 — passed 2026-09-10
 
 Owner attendance and one MIDI owner are required. The owner approved proceeding
-with the minimum single-sample smoke test on 2026-09-10. Full kit/recovery
-acceptance remains a release gate; it no longer blocks offline Phase 2 work.
-The build stays experimental. Hardware results are recorded separately below.
+with the minimum single-sample smoke test on 2026-09-10 and all four steps
+below passed the same evening through the shipped server; evidence is in
+[phase1-smoke-test.md](phase1-smoke-test.md). Offline Phase 2 work may begin.
+Full kit/recovery acceptance remains a release gate. The build stays
+experimental.
 
 1. Stop the server, save a new full Sample Tool backup, close Sample Tool, and
    start this build. Leave the device untouched during all server operations.
