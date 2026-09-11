@@ -154,3 +154,28 @@ def test_pack_project_tool(tmp_path, capsys):
     assert pack_project_tool.main([str(source), "--project", "7", "--out", str(tmp_path / "P07.ppak")]) == 2
     with pytest.raises(SystemExit):
         pack_project_tool.main([str(source), "--project", "5", "--out", str(tmp_path / "x.pak")])
+
+
+def test_diff_projects_tool(tmp_path, capsys):
+    import diff_projects
+    from ep133_mcp.protocol import patterns as enc
+
+    files = minimal_project()
+    changed = dict(files)
+    changed["settings"] = enc.patch_bpm(files["settings"], 97.0)
+    changed["patterns/a05"] = enc.encode_pattern(1, {1: "x" * 16})
+    del changed["patterns/b03"]
+    for name, projects_ in (("old.pak", {5: files, 6: files}), ("new.pak", {5: changed, 7: files})):
+        with zipfile.ZipFile(tmp_path / name, "w") as z:
+            z.writestr("/meta.json", "{}")
+            for number, members in projects_.items():
+                z.writestr(f"/projects/P{number:02}.tar", P.pack_project(members))
+    assert diff_projects.main([str(tmp_path / "old.pak"), str(tmp_path / "old.pak")]) == 0
+    assert capsys.readouterr().out.strip() == "no differences"
+    assert diff_projects.main([str(tmp_path / "old.pak"), str(tmp_path / "new.pak")]) == 1
+    out = capsys.readouterr().out
+    assert "P05: " in out and "~ settings @6+1: f0 -> c2" in out
+    assert "+ patterns/a05 (132 bytes)" in out and "- patterns/b03 (4 bytes)" in out
+    assert "P06: removed" in out and "P07: added" in out
+    assert diff_projects.main([str(tmp_path / "old.pak"), str(tmp_path / "new.pak"), "--project", "6"]) == 1
+    assert "P05" not in capsys.readouterr().out
