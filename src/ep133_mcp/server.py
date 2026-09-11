@@ -26,6 +26,7 @@ from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_referen
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
+from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
 
@@ -51,8 +52,10 @@ _session: DeviceSession | None = None
 _session_lock = threading.Lock()
 _operation_lock = threading.RLock()
 _backups = BackupRegistry(float(os.environ.get("EP133_BACKUP_MAX_AGE_SECONDS", "86400")))
-_installer = Installer(_backups, Journal(os.environ.get(
-    "EP133_JOURNAL_DIR", str(Path.home() / ".local/state/ep133-mcp/journal"))))
+_journal = Journal(os.environ.get(
+    "EP133_JOURNAL_DIR", str(Path.home() / ".local/state/ep133-mcp/journal")))
+_installer = Installer(_backups, _journal)
+_deleter = Deleter(_backups, _journal)
 
 
 def _device() -> DeviceSession:
@@ -190,13 +193,35 @@ def install_kit(mapping: list[dict[str, Any]], project: int, group: str,
     description=(
         "Revert only assignments from the latest journal for this device, provided "
         "pads still match the installed values. Reports anything it cannot restore. "
-        "Uploaded library slots remain in place; deletion is unverified."
+        "Uploaded library slots remain in place; delete_samples removes those."
     ),
 )
 def undo_last_install() -> dict[str, Any]:
     try:
         with _operation_lock:
             return _installer.undo(_device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="delete_samples",
+    description=(
+        "Permanently delete library slots, freeing sample space. THIS CANNOT BE UNDONE by "
+        "undo_last_install: the audio is gone from the device and only a Sample Tool restore "
+        "of a backup that still holds it brings it back. Refuses any slot a pad record in any "
+        "of the nine projects stores, because a stored slot that no longer exists reads as an "
+        "empty pad and cannot be told from one - clear those pads first. Requires a verified "
+        "current backup_id and returns needs_confirmation with each slot's name, frames and "
+        "CRC; show that to the owner and repeat with confirm. The device command is documented "
+        "upstream but unverified here, so each slot is re-read after its delete and reported as "
+        "deleted or not_deleted - never assumed. Not a transaction: read every entry."
+    ),
+)
+def delete_samples(slots: list[int], backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _deleter.delete(slots, backup_id, _device(), confirm)
     except DeviceError as e:
         return _error(e)
 

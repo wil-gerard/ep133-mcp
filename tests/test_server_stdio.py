@@ -29,7 +29,7 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "install_sample", "install_kit", "undo_last_install", "fetch_reference",
+                     "install_sample", "install_kit", "undo_last_install", "delete_samples", "fetch_reference",
                      "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
 
 

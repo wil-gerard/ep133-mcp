@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 # FILE sub-commands (byte 0 of the unpacked payload)
 FILE_INIT = 0x01
+FILE_DELETE = 0x06
 FILE_METADATA = 0x07
 FILE_METADATA_SET = 0x01
 FILE_METADATA_GET = 0x02
@@ -31,6 +32,17 @@ def file_init(mode: int, max_response: int = DEFAULT_MAX_RESPONSE) -> bytes:
     if mode not in (READ_MODE, WRITE_MODE):
         raise ValueError("mode must be READ_MODE or WRITE_MODE")
     return struct.pack(">BBI", FILE_INIT, mode, max_response)
+
+
+def file_delete(file_id: int) -> bytes:
+    """`06 02 <file_id u16 BE>`. UNVERIFIED on this device.
+
+    Upstream's PROTOCOL.md documents this as FILE_DELETE and marks it destructive; it also lists
+    a "failed to delete" error string, which is the only evidence the command exists. Nothing
+    here has been sent to hardware, so every caller must treat a success status as unproven
+    until docs/research/ records a delete that a backup diff confirms."""
+    _check_u16(file_id, "file_id")
+    return struct.pack(">BBH", FILE_DELETE, 0x02, file_id)
 
 
 def metadata_get(file_id: int, page: int = 0) -> bytes:

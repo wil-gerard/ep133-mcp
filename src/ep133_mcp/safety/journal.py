@@ -36,20 +36,25 @@ class Journal:
             if temporary is not None:
                 Path(temporary).unlink(missing_ok=True)
 
-    def create(self, device_id, backup_id, entries):
+    def create(self, device_id, backup_id, entries, operation='install_kit'):
         import time
         record = {'id': uuid.uuid4().hex, 'created_at': time.time(),
                   'device_id': device_id, 'backup_id': backup_id, 'status': 'in_progress',
-                  'entries': entries}
+                  'operation': operation, 'entries': entries}
         self.save(record)
         return record
 
-    def latest(self, device_id):
+    def latest(self, device_id, operation='install_kit'):
+        """The newest record of one operation for this device.
+
+        Operations share the journal directory, so a delete written after an install must not
+        shadow it: undo_last_install reverts pad writes and has nothing to say about a deleted
+        slot. Records written before operations were tagged are installs."""
         records = []
         try:
             for path in self.directory.glob('*.json'):
                 record = json.loads(path.read_text())
-                if record['device_id'] == device_id:
+                if record['device_id'] == device_id and record.get('operation', 'install_kit') == operation:
                     records.append(record)
             return max(records, key=lambda r: r['created_at'], default=None)
         except (OSError, ValueError, KeyError, TypeError) as e:

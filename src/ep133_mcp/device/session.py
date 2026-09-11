@@ -297,6 +297,20 @@ class DeviceSession:
             self._write_request(P.file_put_data(page, pcm[offset:offset + P.UPLOAD_CHUNK_BYTES]))
         self._write_request(P.file_put_data(count, b''))
 
+    def delete_slot(self, slot: int) -> bool:
+        """Delete one library slot and report whether it is gone afterwards.
+
+        FILE_DELETE is documented upstream and UNVERIFIED here, so the return value comes from
+        re-reading the slot rather than from the command's own status: a device that ignores the
+        command answers ok and changes nothing."""
+        self.begin_write()
+        response = self.request(CMD_FILE, P.file_delete(slot))
+        if not response.ok:
+            raise DeviceRejected('device rejected the delete', slot=slot, status=response.status,
+                                 message=response.payload.rstrip(b'\0').decode('latin-1'))
+        self.begin_read()
+        return not self.slot_exists(slot)
+
     def assign_pad(self, node: int, slot: int):
         payload = P.metadata_set(node, {'sym': slot})
         self.begin_write()
