@@ -214,3 +214,39 @@ def test_export_library_tool(tmp_path, capsys):
     (out / "017 unused.wav").write_bytes(b"changed")
     assert export_library.main([str(source), "--out", str(out)]) == 1
     assert (out / "017 unused.wav").read_bytes() == b"changed"
+
+
+def test_blank_project_tool(tmp_path, capsys):
+    """Emptying a project is a whole-file rewrite: generate_ppak can replace a pattern but not
+    remove one, and never clears a pad."""
+    import blank_project
+    from ep133_mcp.protocol import patterns as enc
+
+    files = minimal_project(pad7_slot=16)
+    files["patterns/a01"] = enc.encode_pattern(2, {7: "x..." * 8})
+    files["scenes"] = enc.patch_scene(bytes(712), 4, {"A": 1, "B": 1, "C": 1, "D": 1})
+    source = tmp_path / "backup.pak"
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("/meta.json", json.dumps({"pak_type": "user", "device_version": "2.5.1"}))
+        z.writestr("/projects/P02.tar", P.pack_project(files))
+        z.writestr("/sounds/016 tone.wav", b"RIFF")
+    out = tmp_path / "blank.ppak"
+    assert blank_project.main([str(source), "--project", "2", "--out", str(out), "--bpm", "96"]) == 0
+    text = capsys.readouterr().out
+    assert "1 pads cleared" in text and "1 patterns emptied" in text and "1 scenes cleared" in text
+
+    written = P.unpack_project(P.read_pak(out.read_bytes())[1][2])
+    assert set(written) == set(files)                       # same member list, same flavour
+    for name, data in written.items():
+        if name.startswith("pads/"):
+            assert struct.unpack_from("<H", data, 1)[0] == 0 and struct.unpack_from("<I", data, 8)[0] == 0
+            assert len(data) == len(files[name]) and data[12:] == files[name][12:]   # rest untouched
+        elif name.startswith("patterns/"):
+            assert len(data) == 4 and data[2] == 0 and data[1] >= 1
+    assert enc.decode_bpm(written["settings"]) == pytest.approx(96.0)
+    assert not any(blank_project.scene_populated(written["scenes"], n) for n in range(1, 100))
+    assert written["scenes"][enc.scene_chunk_offset(4) + 4:enc.scene_chunk_offset(4) + 6] == b"\x04\x04"
+    assert P.read_pak(out.read_bytes())[2] == {}            # no sounds: nothing is deleted either
+
+    assert blank_project.main([str(source), "--project", "2", "--out", str(out)]) == 1   # never overwrites
+    assert blank_project.main([str(source), "--project", "5", "--out", str(tmp_path / "x.ppak")]) == 2
