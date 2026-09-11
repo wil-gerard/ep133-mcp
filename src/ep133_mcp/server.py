@@ -10,6 +10,7 @@ journalling exist (docs/design/tool-contracts.md).
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 from typing import Any
@@ -18,6 +19,7 @@ from mcp.server.mcpserver import MCPServer
 
 from . import __version__
 from .device import DeviceError, DeviceSession, DeviceUnavailable
+from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -38,6 +40,7 @@ server = MCPServer(
 _session: DeviceSession | None = None
 _session_lock = threading.Lock()
 _operation_lock = threading.RLock()
+_backups = BackupRegistry(float(os.environ.get("EP133_BACKUP_MAX_AGE_SECONDS", "86400")))
 
 
 def _device() -> DeviceSession:
@@ -112,6 +115,30 @@ def list_pads(project: int | None = None) -> dict[str, Any]:
     except DeviceError as e:
         log.warning("list_pads failed: %s", e)
         return _error(e)
+
+
+@server.tool(
+    name="verify_backup",
+    description=(
+        "Validate a full Sample Tool .pak against device SKU/OS, library occupancy "
+        "and all 432 stored pad slot/length fields. Read-only; returns current/stale "
+        "and a SHA-256 backup_id. Does not compare audio content or prove full restore."
+    ),
+)
+def verify_backup(path: str) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _backups.verify(path, _device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="restore_procedure",
+    description="Return manual Sample Tool restore and post-restore backup comparison guidance. No device I/O.",
+)
+def restore_procedure() -> dict[str, Any]:
+    return RESTORE_PROCEDURE
 
 
 @server.tool(

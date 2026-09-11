@@ -28,7 +28,7 @@ async def test_handshake_lists_tools():
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
-    assert tools == {"device_info", "server_status", "list_pads"}
+    assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure"}
 
 
 @pytest.mark.asyncio
