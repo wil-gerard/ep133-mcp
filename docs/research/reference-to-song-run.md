@@ -248,3 +248,65 @@ be installed after step 5.
 - Note on the interrupt: killing/stopping the MCP client does not stop the
   server or the in-flight upload. The confirmed install kept running to its
   timeout after the owner interrupted; the journal is the source of truth.
+
+## Step 4 — the groove: why the generated pattern was wrong
+
+The owner rejected three generated grooves, then built their own on the device
+by hand (P03 `d14`, scene 19) and called it "about 90% of the way there". Both
+patterns sit on the same three pads and the same kit, so they compare directly.
+Ours was read back from `song3-P03.ppak`; theirs live off the device
+(`generate_ppak` with no `template_pak`, a read-only project read — no backup
+needed for this).
+
+| | ours (`bands`) | theirs (played) |
+|---|---|---|
+| pad 1 hits | 16 | 37 |
+| pad 2 hits | 12 | 16 |
+| pad 3 hits | 41 | 8 |
+| events on the 16th grid | 69 / 69 | **3 / 77** |
+| mean distance off the grid | 0 ticks | **4.1 ticks (21 ms)** |
+| note duration | 24 ticks, every event | kick 14–25 (median 18), snare 32–53 (46), hat 44–98 (94) |
+| event byte 4 | 100 | **100** |
+| event byte 7 | 0 | 8 and 31 |
+
+Five findings, in order of how much they cost us.
+
+1. **We quantize to 16ths; the device does not.** Patterns store 24 ticks per
+   16th and the owner's hand-played bar used them — only 3 of 77 events landed
+   on a step, the rest a mean of 21 ms away. `transcribe_groove` had *measured*
+   that displacement (mean 16.3 ms, max 46.3 ms) and then thrown it away,
+   because `encode_pattern` only took step strings. **This is the largest single
+   loss of feel and it was ours, not the model's** (**verified**).
+2. **Roles, not classes.** Their four-on-the-floor is on pad 2 and their
+   backbeat on pad 3 — the pads our kit labelled *snare* and *hat*. The owner
+   picked pads by ear. Our cluster naming (lowest spectral centroid = kick,
+   middle = snare, highest = hat) is a statement about the separated drum
+   stem's spectrum, not about musical role, and on this material the two do not
+   line up (**verified** by where the owner put each part).
+3. **The hat row was five times too dense** (41 vs 8) and the kick less than
+   half (16 vs 37). Band detection fixed the kick that `classify` missed
+   entirely (1 of 16 beats), but the hat band's threshold is far too permissive
+   on a busy mix.
+4. **One note length for everything.** We wrote 24 ticks per event; the device's
+   own recording varies it per class by a factor of five. A fixed step-length
+   note chokes a long sound and stretches a short one.
+5. **Byte 4 is 100 in the owner's hand-played pattern too** — all 77 events.
+   Whatever carries velocity on this device, it is **not** event byte 4 as the
+   device records it (**verified**, and the strongest evidence yet for Dex
+   `vvg9s9ml`). Byte 7 is not constant: 31 on 43 of 46 kick events, 8 on 16 of
+   23 snare events. It is structured but unexplained (**guessed**: a
+   record-source or choke flag, not a level).
+
+### Tooling changed as a result (`a828b43`)
+
+- `encode_events(bars, [(pad, tick, duration)])` places notes at a tick with a
+  length; `generate_ppak` takes a `patterns: [{group, index, bars, events:
+  [{pad, tick, duration?}]}]` form beside the step form, and reports the
+  off-grid spread of what it wrote.
+- `transcribe_groove` returns `tick_pattern` next to `pattern`: the same hits
+  at the tick each onset actually fell on, with a note length per class taken
+  from the slice the kit cut. The step form stays for hand-written patterns.
+- `pattern_steps(data, strict=False)` and `pattern_events(data)` read a pattern
+  the device recorded. Before this, **`pattern_steps` raised on the first
+  off-grid event, so none of our tools could read anything the owner played** —
+  which is why this comparison needed a new function to happen at all.
