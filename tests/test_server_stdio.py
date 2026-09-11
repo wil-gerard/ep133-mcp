@@ -30,7 +30,7 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "install_sample", "install_kit", "undo_last_install", "fetch_reference",
-                     "analyze_reference"}
+                     "analyze_reference", "extract_kit"}
 
 
 @pytest.mark.asyncio
@@ -63,6 +63,7 @@ def test_fetch_reference_without_audio_extra_is_structured(tmp_path, monkeypatch
     analyzed = module.analyze_reference(str(wav), separation="hpss", beat_tracker="librosa")
     assert analyzed["error"] == "AudioToolsUnavailable"
     assert deps.EXTRA_INSTALL in analyzed["next_step"]
+    assert module.extract_kit(str(wav))["error"] == "AudioToolsUnavailable"
     assert module.server_status()["audio"]["extra_installed"] is False
 
 
@@ -94,6 +95,9 @@ async def test_analyze_reference_through_client(tmp_path):
             assert missing["error"] == "InvalidReference"
             bad = _payload(await session.call_tool("analyze_reference", {**args, "separation": "spleeter"}))
             assert bad["error"] == "InvalidReference"
+            extracted = _payload(await session.call_tool("extract_kit", {**args, "want": ["kick", "snare", "hat"]}))
+            assert [s["class"] for s in extracted["slices"]] == ["kick", "snare", "hat"]
+            assert extracted["install_mapping"][0] == {"pad": 1, "path": extracted["slices"][0]["path"]}
 
 
 def test_device_info_unavailable_is_structured(monkeypatch):

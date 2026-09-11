@@ -20,6 +20,7 @@ from mcp.server.mcpserver import MCPServer
 from . import __version__
 from .audio import deps as audio_deps
 from .audio.analysis import analyze_reference as _analyze_reference
+from .audio.kit import extract_kit as _extract_kit
 from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
@@ -241,6 +242,29 @@ def analyze_reference(clip: str, separation: str = "auto", beat_tracker: str = "
         return _analyze_reference(clip, separation, beat_tracker, force)
     except DeviceError as e:
         log.warning("analyze_reference failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="extract_kit",
+    description=(
+        "Cut up to 12 one-shots from an analyzed clip's stems (runs analyze_reference "
+        "first if needed). want lists pad classes in pad order, default kick, snare, hat, "
+        "perc×3, bass×3, melodic×3. Drum hits are clustered by spectral features into "
+        "kick/snare/hat; bass and melodic slices are distinct pyin notes. Every class label "
+        "and note is probable: the owner should audition the slices (afplay) before "
+        "installing. Slices are 46875 Hz mono 16-bit, at most 1 s, written to kit/ beside "
+        "the clip with kit.json; install_mapping is ready for install_kit and "
+        "required_pcm_bytes is exactly what its preflight will count. Unfilled pads are "
+        "listed with a reason. No device I/O. Needs the audio extra."
+    ),
+)
+def extract_kit(clip: str, want: list[str] | None = None, separation: str = "auto",
+                beat_tracker: str = "auto") -> dict[str, Any]:
+    try:
+        return _extract_kit(clip, want, separation, beat_tracker)
+    except DeviceError as e:
+        log.warning("extract_kit failed: %s", e)
         return _error(e)
 
 
