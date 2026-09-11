@@ -260,3 +260,29 @@ class DeviceSession:
             pad["node"] = P.pad_node(project, pad["group"], pad["pad"])
             pad["stale_reference"] = pad["stored_slot"] != 0 and not exists[pad["stored_slot"]]
         return {"project": project, "pads": pads}
+
+    # ---- captured write operations --------------------------------------
+
+    def _write_request(self, payload: bytes):
+        response = self.request(CMD_FILE, payload)
+        if not response.ok:
+            raise DeviceRejected('device write rejected', status=response.status)
+
+    def begin_write(self):
+        self.greet()
+        self._write_request(P.file_init(P.WRITE_MODE))
+
+    def upload_sample(self, slot: int, name: str, pcm: bytes):
+        meta = P.file_put_meta(name, len(pcm), slot)  # validate before any I/O
+        self.begin_write()
+        self._write_request(meta)
+        count = (len(pcm) + P.UPLOAD_CHUNK_BYTES - 1) // P.UPLOAD_CHUNK_BYTES
+        for page in range(count):
+            offset = page * P.UPLOAD_CHUNK_BYTES
+            self._write_request(P.file_put_data(page, pcm[offset:offset + P.UPLOAD_CHUNK_BYTES]))
+        self._write_request(P.file_put_data(count, b''))
+
+    def assign_pad(self, node: int, slot: int):
+        payload = P.metadata_set(node, {'sym': slot})
+        self.begin_write()
+        self._write_request(payload)

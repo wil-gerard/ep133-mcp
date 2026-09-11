@@ -5,12 +5,12 @@ from pathlib import Path
 import wave
 import zlib
 
-from ..protocol.payloads import pad_node
+from ..protocol.payloads import MAX_UPLOAD_BYTES, pad_node
 from .errors import InvalidDestination, NoSafeSlot, TooLarge, UnsupportedFormat
 
 RATE = 46875
 BYTES_PER_SECOND = RATE * 2
-MAX_PCM_BYTES = 64 * 1024 * 1024
+MAX_PCM_BYTES = MAX_UPLOAD_BYTES
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ def read_sample(path: str | Path) -> Sample:
             if frames <= 0:
                 raise ValueError('sample contains no frames')
             if frames * 2 > MAX_PCM_BYTES:
-                raise TooLarge('Sample exceeds device library capacity', observed=frames * 2,
+                raise TooLarge('Sample exceeds the upload page limit', observed=frames * 2,
                                expected=f'At most {MAX_PCM_BYTES} PCM bytes',
                                next_step='Trim the sample before importing.')
             pcm = wav.readframes(frames)

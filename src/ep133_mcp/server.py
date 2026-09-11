@@ -3,14 +3,14 @@
 Stdout is the MCP stream. Nothing in this package writes to it directly; all
 logging is configured to stderr before anything else runs.
 
-v0.1 exposes read-only tools only. Write tools land once their preflight and
-journalling exist (docs/design/tool-contracts.md).
+Writes require current backups and complete preflight (docs/design/tool-contracts.md).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 import sys
 import threading
 from typing import Any
@@ -20,6 +20,8 @@ from mcp.server.mcpserver import MCPServer
 from . import __version__
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
+from .safety.install import Installer
+from .safety.journal import Journal
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -33,7 +35,9 @@ server = MCPServer(
     version=__version__,
     instructions=(
         "Installs samples onto a Teenage Engineering EP-133 K.O. II. "
-        "Read-only tools never modify the device. This build has no write tools yet."
+        "Read-only tools never modify the device. Writes require a verified current backup. "
+        "Show needs_confirmation impact to the owner and obtain approval before echoing its token. "
+        "Kit installs are sequential and may partially succeed."
     ),
 )
 
@@ -41,6 +45,8 @@ _session: DeviceSession | None = None
 _session_lock = threading.Lock()
 _operation_lock = threading.RLock()
 _backups = BackupRegistry(float(os.environ.get("EP133_BACKUP_MAX_AGE_SECONDS", "86400")))
+_installer = Installer(_backups, Journal(os.environ.get(
+    "EP133_JOURNAL_DIR", str(Path.home() / ".local/state/ep133-mcp/journal"))))
 
 
 def _device() -> DeviceSession:
@@ -91,7 +97,7 @@ def device_info(include_serial: bool = False) -> dict[str, Any]:
         "sample_free_bytes": root.free_space_in_bytes,
         "native_sample_rate_hz": root.native_rate,
         "active_project": active,
-        "write_tools_available": False,
+        "write_tools_available": True,
     }
     if include_serial:
         info["serial"] = g.serial
@@ -142,6 +148,54 @@ def restore_procedure() -> dict[str, Any]:
 
 
 @server.tool(
+    name="install_sample",
+    description=(
+        "Install one mono 16-bit 46875 Hz WAV onto a pad index (1..12). Requires "
+        "a current verify_backup backup_id. Shows exact destructive impact for owner "
+        "confirmation before writing. Verifies CRC and stored assignment, journals "
+        "partial failures. Power-cycle persistence needs a separate hardware check."
+    ),
+)
+def install_sample(path: str, project: int, group: str, pad: int,
+                   backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    return install_kit([{"pad": pad, "path": path}], project, group, backup_id, confirm)
+
+
+@server.tool(
+    name="install_kit",
+    description=(
+        "Install 1..12 distinct {pad, path} entries into a project/group. NOT a "
+        "transaction: preflights all entries, then installs sequentially and stops "
+        "on failure, reporting each outcome and a shared undo journal. Requires "
+        "a verified current backup_id and owner approval for destructive impact."
+    ),
+)
+def install_kit(mapping: list[dict[str, Any]], project: int, group: str,
+                backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _installer.install(mapping, project, group, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="undo_last_install",
+    description=(
+        "Revert only assignments from the latest journal for this device, provided "
+        "pads still match the installed values. Reports anything it cannot restore. "
+        "Uploaded library slots remain in place; deletion is unverified."
+    ),
+)
+def undo_last_install() -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _installer.undo(_device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
     name="server_status",
     description=(
         "Report this server's version and whether an EP-133 MIDI port is visible, "
@@ -158,7 +212,7 @@ def server_status() -> dict[str, Any]:
         "device_output_visible": any("EP-133" in n for n in outs),
         "device_input_visible": any("EP-133" in n for n in ins),
         "session_open": _session is not None,
-        "write_tools_available": False,
+        "write_tools_available": True,
     }
 
 

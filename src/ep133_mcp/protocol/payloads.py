@@ -117,3 +117,25 @@ def parse_metadata_page(payload: bytes) -> bytes:
 def _check_u16(value: int, name: str) -> None:
     if not 0 <= value < 2**16:
         raise ValueError(f"{name} {value} must fit in u16")
+
+
+# Ported from ep133-ppak (MIT); reproduced against the slot16 capture.
+UPLOAD_CHUNK_BYTES = 433
+MAX_UPLOAD_BYTES = UPLOAD_CHUNK_BYTES * 65535  # leave u16 page for terminator
+
+
+def file_put_meta(name: str, data_size: int, slot: int) -> bytes:
+    name_bytes = name.encode('ascii')
+    if not name_bytes or b'\0' in name_bytes or not 1 <= slot <= 999:
+        raise ValueError('invalid upload name or slot')
+    if not 0 < data_size <= MAX_UPLOAD_BYTES:
+        raise ValueError('upload exceeds verified page range')
+    return (b'\x02\x00\x05' + struct.pack('>HHI', slot, 1000, data_size)
+            + name_bytes + b'\0{"channels":1}')
+
+
+def file_put_data(page: int, data: bytes) -> bytes:
+    _check_u16(page, 'page')
+    if len(data) > UPLOAD_CHUNK_BYTES:
+        raise ValueError('upload chunk exceeds 433 bytes')
+    return b'\x02\x01' + struct.pack('>H', page) + data

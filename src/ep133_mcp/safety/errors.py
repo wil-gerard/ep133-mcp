@@ -31,3 +31,11 @@ class InvalidDestination(SafetyError):
 
 class NoSafeSlot(SafetyError):
     pass
+
+
+class VerificationFailed(SafetyError):
+    pass
+
+
+class JournalError(SafetyError):
+    pass
