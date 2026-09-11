@@ -10,3 +10,6 @@
 
 # Transient device state dumps from tools/assign_test.py
 tools/assign_test_state.json
+
+# Parallel-agent worktrees live here; never part of this repo.
+.claude/worktrees/
