@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import logging
+import zlib
 import queue
 import threading
 import time
@@ -246,6 +247,41 @@ class DeviceSession:
             if len(chunk) < projects.PAGE_DATA_BYTES:
                 return b"".join(chunks)
         raise DeviceRejected("project page limit reached without EOF", project=project)
+
+    def read_file(self, file_id: int, max_pages: int = 200_000) -> bytes:
+        """Stream a file's raw bytes with FILE_READ_OPEN / FILE_READ_DATA.
+
+        The same pair that reads a project TAR also reads a sample slot: slot 17 came back as
+        37,500 bytes of `017.pcm` whose crc32 equalled the slot metadata's crc, and byte for byte
+        equal to the WAV payload Sample Tool put in its own backup. Roughly 25 KiB/s."""
+        r = self.request(CMD_FILE, struct.pack(">BBHI", 3, 0, file_id, 0))
+        if not r.ok:
+            raise DeviceRejected("file read open rejected", file_id=file_id, status=r.status)
+        chunks = []
+        for page in range(max_pages):
+            rr = self.request(CMD_FILE, projects.project_page(page) if page < projects.MAX_PROJECT_PAGES
+                              else struct.pack(">BBH", 3, 1, page))
+            if not rr.ok:
+                raise DeviceRejected("file read page rejected", file_id=file_id, page=page, status=rr.status)
+            try:
+                chunk = projects.page_data(rr.payload, page)
+            except ValueError as e:
+                raise DeviceRejected(str(e), file_id=file_id, page=page) from e
+            chunks.append(chunk)
+            if len(chunk) < projects.PAGE_DATA_BYTES:
+                return b"".join(chunks)
+        raise DeviceRejected("file page limit reached without EOF", file_id=file_id)
+
+    def slot_pcm(self, slot: int) -> bytes:
+        """One library slot's raw PCM, checked against the crc the device stores for it."""
+        meta = self.metadata(slot)
+        if not meta:
+            raise DeviceRejected("slot is empty", slot=slot)
+        data = self.read_file(slot)
+        if zlib.crc32(data) != meta.get("crc"):
+            raise DeviceRejected("slot read does not match its stored crc", slot=slot,
+                                 observed=zlib.crc32(data), expected=meta.get("crc"))
+        return data
 
     def slot_exists(self, slot: int) -> bool:
         r = self.request(CMD_FILE, P.metadata_get(slot))

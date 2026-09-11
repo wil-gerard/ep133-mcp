@@ -26,6 +26,7 @@ from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_referen
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
+from .safety.capture import create_backup as _create_backup
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
@@ -200,6 +201,26 @@ def undo_last_install() -> dict[str, Any]:
     try:
         with _operation_lock:
             return _installer.undo(_device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="create_backup",
+    description=(
+        "Write a full .pak backup by reading the device - the nine project TARs and every "
+        "library slot's audio - with no Sample Tool. Each slot is verified against the CRC the "
+        "device stores for it, and the result is the same shape Sample Tool writes, so "
+        "verify_backup accepts it and Sample Tool can restore it. The device streams about "
+        "25 KiB/s, so a full library takes tens of minutes; pass base=<an earlier .pak> to copy "
+        "any slot whose CRC still matches and read only what changed. Never overwrites out. "
+        "Writing a backup does not prove it restores: only a post-restore backup diff does."
+    ),
+)
+def create_backup(out: str, base: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _create_backup(_device(), out, base)
     except DeviceError as e:
         return _error(e)
 

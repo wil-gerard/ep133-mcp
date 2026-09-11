@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 import os
@@ -140,3 +141,94 @@ def test_empty_slot_zero_is_not_library_audio(tmp_path):
     device.metadata.return_value = {'name': 'unexpected audio', 'crc': 12}
     with pytest.raises(InvalidBackup, match='sentinel'):
         registry.verify(path, device)
+
+
+class CapturingDevice:
+    """Reads like the real device: project TARs, slot metadata, and raw PCM per slot."""
+
+    def __init__(self, pcm):
+        from types import SimpleNamespace
+        self.pcm = pcm
+        self.greeting = SimpleNamespace(sku='TE032AS001', os_version='2.5.1', serial='s', product='EP-133')
+        self.reads = []
+
+    def greet(self):
+        return self.greeting
+
+    def begin_read(self):
+        return None
+
+    def slot_exists(self, slot):
+        return slot in self.pcm
+
+    def metadata(self, slot):
+        import zlib
+        if slot not in self.pcm:
+            return None
+        data = self.pcm[slot]
+        return {'name': f'sound {slot}', 'crc': zlib.crc32(data), 'sample.end': len(data) // 2,
+                'samplerate': 46875, 'channels': 1, 'format': 's16'}
+
+    def slot_pcm(self, slot):
+        self.reads.append(slot)
+        return self.pcm[slot]
+
+    def project_tar(self, project):
+        from test_pack_project import minimal_project
+        from ep133_mcp.protocol import projects as P
+        return P.pack_project(minimal_project())
+
+
+def test_create_backup_reads_the_device_and_reuses_by_crc(tmp_path):
+    """Backups take tens of minutes at 25 KiB/s, so an unchanged slot must never be re-read."""
+    import wave
+    import zipfile
+    from ep133_mcp.safety.capture import create_backup
+    from ep133_mcp.protocol.projects import read_pak
+
+    device = CapturingDevice({3: b'\x01\x02' * 100, 7: b'\x03\x04' * 50})
+    first = tmp_path / 'one.pak'
+    report = create_backup(device, first)
+    assert report['status'] == 'written' and report['slots'] == 2 and report['slots_read'] == 2
+    assert report['slots_reused'] == 0 and device.reads == [3, 7]
+    meta, projects, sounds = read_pak(first.read_bytes())
+    assert meta['pak_type'] == 'user' and meta['device_version'] == '2.5.1'
+    assert sorted(projects) == list(range(1, 10))
+    assert sorted(sounds) == ['/sounds/003 sound 3.wav', '/sounds/007 sound 7.wav']
+    with wave.open(io.BytesIO(sounds['/sounds/003 sound 3.wav'])) as w:
+        assert w.getframerate() == 46875 and w.getnchannels() == 1 and w.getsampwidth() == 2
+        assert w.readframes(w.getnframes()) == device.pcm[3]        # byte-exact audio
+
+    # Second backup with the first as base: unchanged slots are copied, changed ones re-read.
+    device.reads.clear()
+    device.pcm[7] = b'\xaa\xbb' * 50
+    second = tmp_path / 'two.pak'
+    again = create_backup(device, second, base=first)
+    assert again['slots_reused'] == 1 and again['slots_read'] == 1 and device.reads == [7]
+    _, _, sounds2 = read_pak(second.read_bytes())
+    with wave.open(io.BytesIO(sounds2['/sounds/007 sound 7.wav'])) as w:
+        assert w.readframes(w.getnframes()) == device.pcm[7]
+
+    with pytest.raises(InvalidBackup):
+        create_backup(device, second)                                # never overwrites
+    with pytest.raises(InvalidBackup):
+        create_backup(device, tmp_path / 'x.ppak')
+
+
+def test_create_backup_records_a_slot_it_could_not_read(tmp_path):
+    from ep133_mcp.device import DeviceError
+    from ep133_mcp.safety.capture import create_backup
+
+    device = CapturingDevice({3: b'\x01\x02' * 10, 9: b'\x05\x06' * 10})
+
+    def explode(slot):
+        if slot == 9:
+            raise DeviceError('slot read does not match its stored crc')
+        return device.pcm[slot]
+
+    device.slot_pcm = explode
+    report = create_backup(device, tmp_path / 'partial.pak')
+    assert report['status'] == 'partial'
+    assert report['problems'] == [{'slot': 9, 'problem': 'DeviceError',
+                                   'message': 'slot read does not match its stored crc'}]
+    assert report['slots_read'] == 1
