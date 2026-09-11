@@ -280,15 +280,17 @@ def extract_kit(clip: str, want: list[str] | None = None, separation: str = "aut
         "from the analyzed downbeat; pass downbeat_s to correct the phase when the groove "
         "comes out rotated by a beat (likely with the librosa fallback). bars is 1, 2 or 4, "
         "fitted to the clip unless given; onsets outside the bars fold back. Reports the "
-        "quantization error in ms. Every hit is probable. Writes kit/groove.json. No "
-        "device I/O. Needs the audio extra."
+        "quantization error in ms. min_strength (0..1) drops onsets weaker than that, "
+        "which keeps the accents when every hit would otherwise play at one velocity. "
+        "Every hit is probable. Writes kit/groove.json. No device I/O. Needs the audio extra."
     ),
 )
 def transcribe_groove(clip: str, kit: str | None = None, bars: int | None = None, group: str = "A",
                       index: int = 1, downbeat_s: float | None = None, separation: str = "auto",
-                      beat_tracker: str = "auto") -> dict[str, Any]:
+                      beat_tracker: str = "auto", min_strength: float = 0.0) -> dict[str, Any]:
     try:
-        return _transcribe_groove(clip, kit, bars, group, index, downbeat_s, separation, beat_tracker)
+        return _transcribe_groove(clip, kit, bars, group, index, downbeat_s, separation, beat_tracker,
+                                  min_strength)
     except DeviceError as e:
         log.warning("transcribe_groove failed: %s", e)
         return _error(e)

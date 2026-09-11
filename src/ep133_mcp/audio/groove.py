@@ -133,7 +133,11 @@ def assign_classes(drums_audio, sr: int, onsets: dict, pads: list[dict]) -> list
 
 def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int | None = None,
                       group: str = "A", index: int = 1, downbeat_s: float | None = None,
-                      separation: str = "auto", beat_tracker: str = "auto") -> dict:
+                      separation: str = "auto", beat_tracker: str = "auto",
+                      min_strength: float = 0.0) -> dict:
+    if not isinstance(min_strength, (int, float)) or isinstance(min_strength, bool) or not 0.0 <= min_strength <= 1.0:
+        raise InvalidReference("min_strength must be a number from 0 to 1", observed=min_strength,
+                               next_step="Omit it to keep every onset, or raise it to keep only accents.")
     if bars is not None and bars not in BAR_CHOICES:
         raise InvalidReference("bars must be 1, 2 or 4", observed=bars, next_step="Omit bars to fit the clip length.")
     if group not in GROUPS or not isinstance(index, int) or index < 1:
@@ -170,9 +174,15 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     rows = {cls: ["."] * total_steps for cls in pad_of}
     hits = {cls: 0 for cls in pad_of}
     errors: list[float] = []
-    dropped = folded = before = 0
+    dropped = folded = before = weak = 0
     last_step: float | None = None
-    for t, cls in zip(drums["onsets_s"], classes):
+    strengths = drums.get("strength") or [1.0] * len(drums["onsets_s"])
+    for t, cls, strength in zip(drums["onsets_s"], classes, strengths):
+        # Every hit plays at one velocity, so ghost notes land as loud as accents; dropping the
+        # quiet ones keeps the skeleton of the groove instead of a uniform wall.
+        if strength < min_strength:
+            weak += 1
+            continue
         steps, error = grid.step(t)
         if last_step is not None and steps - last_step < MIN_INTERVAL_STEPS:
             dropped += 1
@@ -198,6 +208,7 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
         "quantization": {"mean_ms": round(sum(errors) / len(errors), 1) if errors else None,
                          "max_ms": round(max(errors), 1) if errors else None,
                          "onsets": len(drums["onsets_s"]), "placed": len(errors), "folded": folded,
+                         "below_min_strength": weak,
                          "dropped_retriggers": dropped, "before_downbeat": before},
         "beat_tracker": analysis["beat_tracker"], "separation": analysis["separation"], "probable": True,
     }

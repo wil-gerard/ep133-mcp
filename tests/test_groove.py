@@ -133,3 +133,16 @@ def test_kit_from_another_clip_is_rejected(fixture, tmp_path):
     foreign.write_text(json.dumps(record))
     with pytest.raises(InvalidReference, match='different clip'):
         groove.transcribe_groove(fixture['clip'], kit=foreign, downbeat_s=0.0, **FALLBACK)
+
+
+def test_min_strength_drops_weak_onsets(fixture):
+    """Every hit plays at one velocity, so dropping quiet onsets is the only way to keep accents."""
+    full = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, **FALLBACK)
+    assert full['quantization']['below_min_strength'] == 0
+    thinned = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, min_strength=0.999, **FALLBACK)
+    assert thinned['quantization']['below_min_strength'] > 0
+    assert thinned['quantization']['placed'] < full['quantization']['placed']
+    assert sum(p['hits'] for p in thinned['pads']) < sum(p['hits'] for p in full['pads'])
+    for bad in (-0.1, 1.5, '0.5', True):
+        with pytest.raises(InvalidReference):
+            groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, min_strength=bad, **FALLBACK)
