@@ -157,6 +157,34 @@ class DeviceSession:
                     return r
                 log.debug("discarding unmatched response id=%s", r.request_id)
 
+    # ---- channel messages ------------------------------------------------
+
+    def send_note(self, channel: int, note: int, velocity: int = 100, duration_s: float = 0.25) -> dict:
+        """A MIDI note on the device's own port, held for duration_s, then released.
+
+        Not SysEx: the EP-133 takes external MIDI notes on the channels its groups are set to, so
+        this needs no protocol work and cannot leave a file open. What it can do is land in a
+        pattern if the device is recording, and which note reaches which pad is the device's MIDI
+        setting, not ours - docs/research/play-proof.md records what was observed."""
+        if type(channel) is not int or not 1 <= channel <= 16:
+            raise ValueError("channel must be 1..16")
+        if type(note) is not int or not 0 <= note <= 127:
+            raise ValueError("note must be 0..127")
+        if type(velocity) is not int or not 1 <= velocity <= 127:
+            raise ValueError("velocity must be 1..127")
+        if isinstance(duration_s, bool) or not isinstance(duration_s, (int, float)) or not 0.01 <= duration_s <= 5.0:
+            raise ValueError("duration_s must be 0.01..5")
+        if self._out is None:
+            raise DeviceUnavailable("session not open")
+        import mido
+        with self._lock:
+            started = time.monotonic()
+            self._out.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
+            time.sleep(duration_s)
+            self._out.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
+            held = time.monotonic() - started
+        return {"channel": channel, "note": note, "velocity": velocity, "held_s": round(held, 3)}
+
     # ---- verified read operations ---------------------------------------
 
     def greet(self) -> P.Greeting:

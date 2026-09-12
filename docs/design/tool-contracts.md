@@ -238,6 +238,16 @@ and reads the record. A key the record did not hold before the change cannot
 be unset over this interface and is listed as `not_restorable`. Separate from
 `undo_last_install`, which only reverts `sym`.
 
+### `play_note(channel, note, velocity=100, duration_s=0.25)`
+A plain MIDI note on the device's port, held then released, under the
+operation lock. Nothing persists and no SysEx file is opened, so there is
+no backup gate — but a recording sequencer would capture it, so the owner
+is present the first time. The SysEx `PLAY` command stays unused: its
+trailing bytes are undocumented and neither upstream project has a capture
+of it (krate lists it as a wishlist item). Which channel is which group and
+which note is which pad is whatever the device's MIDI settings say;
+`docs/research/play-proof.md` will record the observed map.
+
 ### `diff_project(project, old, new=None)` — read-only
 The diff method's loop. `old` is a `.pak`/`.ppak`; `new` another one or,
 omitted, a live read. `settings` and `fx_settings` differences come back as

@@ -102,3 +102,18 @@ def test_pad_metadata_requires_sym():
     d.request = Mock(side_effect=_pages(b'{"name":"not a pad"}'))
     with pytest.raises(DeviceRejected):
         d.pad_metadata(1, 'A', 1)
+
+
+def test_send_note_sends_on_then_off_on_the_port():
+    d = DeviceSession()
+    d._out = Mock()
+    out = d.send_note(2, 60, 90, 0.01)
+    sent = [call.args[0] for call in d._out.send.call_args_list]
+    assert [(m.type, m.channel, m.note, m.velocity) for m in sent] == [('note_on', 1, 60, 90), ('note_off', 1, 60, 0)]
+    assert out['channel'] == 2 and out['held_s'] >= 0.01
+    for bad in ((0, 60), (17, 60), (1, 128), (1, 60, 0), (1, 60, 100, 0.0), (1, 60, 100, 9)):
+        with pytest.raises(ValueError):
+            d.send_note(*bad)
+    d._out = None
+    with pytest.raises(DeviceUnavailable):
+        d.send_note(1, 60)

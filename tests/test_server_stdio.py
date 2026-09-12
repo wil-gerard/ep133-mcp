@@ -30,7 +30,7 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "chop_sample", "undo_last_chop", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
-                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak", "diff_project"}
+                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak", "diff_project", "play_note"}
 
 
 @pytest.mark.asyncio
@@ -150,6 +150,8 @@ class Device(FakeDevice):
         return {'project': project or 1, 'pads': [], 'fields': fields}
     def read_pad(self, project, group, pad):
         return {'project': project, 'group': group, 'pad': pad, 'sym': 0, 'pad_metadata': {'sym': 0}, 'slot_metadata': None}
+    def send_note(self, channel, note, velocity=100, duration_s=0.25):
+        return {'channel': channel, 'note': note, 'velocity': velocity, 'held_s': duration_s}
     def close(self):
         pass
 module._session = Device()
@@ -191,6 +193,7 @@ module.main()
             assert bad['error'] == 'InvalidDestination'
             assert _payload(await session.call_tool('undo_last_pad_change'))['status'] == 'nothing_to_undo'
             assert _payload(await session.call_tool('undo_last_chop'))['status'] == 'nothing_to_undo'
+            assert _payload(await session.call_tool('play_note', {'channel': 1, 'note': 36}))['note'] == 36
             bad = _payload(await session.call_tool('chop_sample', {'path': str(wav), 'project': 1, 'group': 'A',
                 'pads': [1, 1], 'slices': {'mode': 'equal'}, 'backup_id': backup['backup_id']}))
             assert bad['error'] == 'InvalidDestination'

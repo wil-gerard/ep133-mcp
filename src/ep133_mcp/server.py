@@ -587,6 +587,28 @@ def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: 
 
 
 @server.tool(
+    name="play_note",
+    description=(
+        "Send one MIDI note (channel 1..16, note 0..127, velocity 1..127, held duration_s then "
+        "released) on the EP-133's own port, so a pad can be auditioned without touching the "
+        "device. Plain channel MIDI, not SysEx: nothing is written and no file is opened. Which "
+        "channel reaches which group and which note reaches which pad are the device's MIDI "
+        "settings (MIDI in must be on); the SysEx PLAY command is not used because its payload is "
+        "undocumented and nobody has captured it. Owner present: if the sequencer is recording, "
+        "the note lands in the active pattern. Observations go in docs/research/play-proof.md."
+    ),
+)
+def play_note(channel: int, note: int, velocity: int = 100, duration_s: float = 0.25) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _device().send_note(channel, note, velocity, duration_s)
+    except ValueError as e:
+        return {"error": "InvalidInput", "message": str(e)}
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
     name="diff_project",
     description=(
         "Name every byte that differs in one project (1..9) between two copies: old is a .pak/.ppak "
