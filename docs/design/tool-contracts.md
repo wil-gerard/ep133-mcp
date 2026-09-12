@@ -179,6 +179,39 @@ landed, which did not, and one journal id covering the landed set so
 ### `undo_last_install()` / `restore_procedure()`
 As under Restore.
 
+### `set_pad(project, group, pad, params, backup_id, confirm=None)`
+Per-pad sound parameters through the same `FILE_METADATA_SET` that assigns a
+pad. `params` is any subset of the 14 fields upstream lists as honoured
+(`sample.start/end`, `sound.playmode`, `envelope.attack/release`,
+`sound.pitch/amplitude/pan/mutegroup`, `time.mode`, `sound.bpm/bars/rootnote`,
+`midi.channel`); anything else, including `sym`, is refused before I/O.
+Preflight: destination valid → values in range and enums strings → backup
+current → pad read (`read_pad`) → `sym` non-zero → trim within the slot's
+`sample.end`. Then `needs_confirmation` carrying `before` (the current value
+of every field to be written) and `after`, plus `auto_paired` when
+`envelope.release` was added to complete a playmode. The token is bound to
+that impact, so a device that changes the pad between calls invalidates it.
+
+Write: journal `{file_id, requested, before, before_record}` → one metadata
+SET of exactly the requested fields → read the pad back → report each field
+as `applied`, `changed` (`{requested, stored}`) or `dropped`, and every other
+key that moved as `side_effects`. Status is `written` only when nothing was
+changed or dropped; otherwise `written_with_differences`. The device's
+coupling rules are documented upstream, not observed here, so the tool
+reports rather than predicts them. `power_cycle_verified` is always false.
+
+### `set_slot(slot, params, backup_id, confirm=None)`
+Same flow on a library slot's record: `name`, `sound.loopstart/loopend`
+(trim-only on this device) and the shared `sound.*` / `envelope.*` /
+`time.mode` fields. The impact names the slot's `name` and `crc` so the
+owner recognises it; a slot's parameters reach every pad that plays it.
+
+### `undo_last_pad_change()`
+Writes the `before` values of the latest `set_pad`/`set_slot` journal back
+and reads the record. A key the record did not hold before the change cannot
+be unset over this interface and is listed as `not_restorable`. Separate from
+`undo_last_install`, which only reverts `sym`.
+
 ### Deliberately absent
 Firmware anything. Format. `FILE_DELETE` on arbitrary slots. Project switching
 (`active` only takes effect at boot; exposed as info, not action). Speculative

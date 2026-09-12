@@ -33,6 +33,7 @@ from .safety.capture import create_backup as _create_backup
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
+from .safety.params import ParamWriter
 from .safety.preflight import validate_destination
 
 logging.basicConfig(
@@ -61,6 +62,7 @@ _journal = Journal(os.environ.get(
     "EP133_JOURNAL_DIR", str(Path.home() / ".local/state/ep133-mcp/journal")))
 _installer = Installer(_backups, _journal)
 _deleter = Deleter(_backups, _journal)
+_params = ParamWriter(_backups, _journal)
 
 
 def _device() -> DeviceSession:
@@ -269,6 +271,72 @@ def undo_last_install() -> dict[str, Any]:
     try:
         with _operation_lock:
             return _installer.undo(_device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="set_pad",
+    description=(
+        "Write per-pad sound parameters to one pad (project 1..9, group A..D, pad 1..12 in the "
+        "list_pads numbering) through the same metadata write that assigns a pad. params is any "
+        "subset of: sample.start, sample.end (trim, in frames of the slot's sample), "
+        "sound.playmode ('oneshot'|'key'|'legato' - strings, ints are rejected), envelope.attack, "
+        "envelope.release (0..255), sound.pitch (semitones -12..12), sound.amplitude (0..100), "
+        "sound.pan (-16..16), sound.mutegroup (bool), time.mode ('off'|'bar'|'bpm'), sound.bpm "
+        "(1..200), sound.bars, sound.rootnote (0..127), midi.channel (0..15). Only the fields given "
+        "are sent (the device merges); sound.playmode is paired with envelope.release (oneshot 255, "
+        "key 15) unless release is given. Requires a verified current backup_id and returns "
+        "needs_confirmation with before/after values; repeat with confirm. The pad is read back "
+        "after the write and every field reported as applied, changed (the device stored another "
+        "value) or dropped, with side_effects for any other key that moved - the device's own "
+        "coupling has only been documented upstream, never observed here. Journalled so "
+        "undo_last_pad_change writes the previous values back. Power-cycle persistence is a "
+        "separate check."
+    ),
+)
+def set_pad(project: int, group: str, pad: int, params: dict[str, Any], backup_id: str,
+            confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _params.set_pad(project, group, pad, params, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="set_slot",
+    description=(
+        "Write slot-level fields to one library slot (1..999): name (<=20 ASCII), sound.loopstart / "
+        "sound.loopend (frames; trim-only on this device, never an auto-loop; -1 clears), and the "
+        "same sound.* / envelope.* / time.mode fields set_pad takes. Only the given fields are sent. "
+        "Requires a verified current backup_id, returns needs_confirmation with before/after, "
+        "reads the slot back and reports applied / changed / dropped / side_effects, and journals "
+        "the previous values for undo_last_pad_change. A slot's parameters affect every pad in "
+        "every project that plays it."
+    ),
+)
+def set_slot(slot: int, params: dict[str, Any], backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _params.set_slot(slot, params, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="undo_last_pad_change",
+    description=(
+        "Write back the values the latest set_pad / set_slot journal recorded before its write, "
+        "then read the record and report applied / changed / dropped. A field the record did not "
+        "hold before the change cannot be unset and is listed under not_restorable. Does not touch "
+        "install journals; undo_last_install handles those."
+    ),
+)
+def undo_last_pad_change() -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _params.undo(_device())
     except DeviceError as e:
         return _error(e)
 

@@ -29,7 +29,7 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "read_pad", "read_project", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
+                     "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
                      "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
 
 
@@ -184,6 +184,12 @@ module.main()
             stale = _payload(await session.call_tool('install_sample', {
                 'path': str(wav), 'project': 1, 'group': 'A', 'pad': 3, 'backup_id': backup['backup_id']}))
             assert stale['error'] == 'BackupStale'
+            refused = _payload(await session.call_tool('set_pad', {
+                'project': 1, 'group': 'A', 'pad': 1, 'params': {'sound.pitch': 1}, 'backup_id': backup['backup_id']}))
+            assert refused['error'] == 'BackupStale'
+            bad = _payload(await session.call_tool('set_slot', {'slot': 1, 'params': {'sym': 2}, 'backup_id': 'x'}))
+            assert bad['error'] == 'InvalidDestination'
+            assert _payload(await session.call_tool('undo_last_pad_change'))['status'] == 'nothing_to_undo'
             undo = _payload(await session.call_tool('undo_last_install'))
             assert undo['status'] == 'undone' and undo['library_slots_left_in_place'] == [1, 2]
             from ep133_mcp.protocol import projects as P

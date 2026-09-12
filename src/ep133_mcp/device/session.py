@@ -376,7 +376,15 @@ class DeviceSession:
         self.begin_read()
         return not self.slot_exists(slot)
 
-    def assign_pad(self, node: int, slot: int):
-        payload = P.metadata_set(node, {'sym': slot})
+    def set_metadata(self, file_id: int, fields: dict):
+        """Partial-merge JSON write to a pad node or slot: only the given keys change (upstream 10.3).
+
+        The same call that assigns a pad ({'sym': slot}, proven here) carries the per-pad sound
+        parameters upstream verified; a status-0 answer is not proof the device kept a field, so
+        every caller reads the record back afterwards."""
+        payload = P.metadata_set(file_id, fields)  # validate before any I/O
         self.begin_write()
         self._write_request(payload)
+
+    def assign_pad(self, node: int, slot: int):
+        self.set_metadata(node, {'sym': slot})
