@@ -313,3 +313,20 @@ def test_backup_stays_valid_while_the_device_only_loses_content(tmp_path):
     assert registry.verify(path, device)['status'] == 'stale'
     with pytest.raises(BackupStale):
         registry.require_current(result['backup_id'], device)
+
+
+def test_incremental_backup_refreshes_metadata_when_pcm_is_unchanged(tmp_path):
+    from ep133_mcp.safety.capture import create_backup
+    from ep133_mcp.safety.recovery import parse_sound
+    from ep133_mcp.protocol.projects import read_pak
+    device = CapturingDevice({3: b'\x01\x02' * 100})
+    first, second = tmp_path / 'old.pak', tmp_path / 'new.pak'
+    create_backup(device, first)
+    original = device.metadata
+    device.metadata = lambda slot: original(slot) | {'name': 'renamed', 'sound.pan': 4}
+    device.reads.clear()
+    result = create_backup(device, second, base=first)
+    assert result['slots_reused'] == 1 and device.reads == []
+    _, _, sounds = read_pak(second.read_bytes())
+    assert list(sounds) == ['/sounds/003 renamed.wav']
+    assert parse_sound('renamed', sounds['/sounds/003 renamed.wav'])['fields']['sound.pan'] == 4

@@ -111,7 +111,7 @@ def test_check_flags_active_project_sku_and_slots(tmp_path):
     assert out["slots"]["absent_and_not_included"] == [16]
     d.slots = {16}
     out = check_ppak(ppak(tmp_path, sounds={"/sounds/016 tone.wav": wav()}, name="y.ppak"), 7, d)
-    assert out["slots"]["included_but_already_on_device"] == [16] and any("overwrite" in p for p in out["problems"])
+    assert out["slots"]["included_but_already_on_device"] == [16] and bool(out["problems"])
 
 
 def test_generate_ppak_output_passes_check(tmp_path):
@@ -181,9 +181,11 @@ def write_backup_pak(d, path):
 
 
 def approve(importer, d, path, project):
-    first = importer.import_ppak(path, project, "backup", d)
+    backup = path.parent / "session.pak"
+    backup_id = __import__("hashlib").sha256(backup.read_bytes()).hexdigest() if backup.exists() else "backup"
+    first = importer.import_ppak(path, project, backup_id, d)
     assert first["status"] == "needs_confirmation" and d.written == []
-    return first, importer.import_ppak(path, project, "backup", d, first["confirm"])
+    return first, importer.import_ppak(path, project, backup_id, d, first["confirm"])
 
 
 def test_import_shows_impact_writes_the_tar_and_verifies_bytes(imp):
@@ -205,8 +207,7 @@ def test_import_refuses_problems_and_sound_carrying_files(imp):
     with pytest.raises(InvalidDestination):
         importer.import_ppak(blank_ppak(tmp_path, project=8, name="p8.ppak"), 7, "backup", d)   # wrong project
     with_sound = ppak(tmp_path, 7, files=minimal_project(pad7_slot=40), sounds={"/sounds/40 x.wav": wav()}, name="s.ppak")
-    with pytest.raises(InvalidDestination):
-        importer.import_ppak(with_sound, 7, "backup", d)
+    assert importer.import_ppak(with_sound, 7, "backup", d)["status"] == "needs_confirmation"
     assert d.written == []
 
 

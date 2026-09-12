@@ -89,6 +89,8 @@ def unpack_project(data: bytes) -> dict[str, bytes]:
         for member in archive.getmembers():
             if member.name.startswith(("/", "../")) or "/../" in member.name:
                 raise ValueError(f"refusing archive member path {member.name!r}")
+            if member.name in files:
+                raise ValueError(f"duplicate project member: {member.name}")
             if member.isfile():
                 files[member.name] = archive.extractfile(member).read()
             elif not member.isdir():
@@ -196,12 +198,23 @@ def build_ppak(project: int, tar: bytes, meta: dict, sounds: dict[str, bytes] | 
 
 def read_pak(data: bytes) -> tuple[dict, dict[int, bytes], dict[str, bytes]]:
     """(meta, {project number: TAR bytes}, {'/sounds/...': bytes}) from a .pak or .ppak."""
+    if len(data) > 128 * 1024 * 1024:
+        raise ValueError("archive exceeds 128 MiB limit")
     with zipfile.ZipFile(io.BytesIO(data)) as z:
+        if sum(m.file_size for m in z.infolist()) > 128 * 1024 * 1024:
+            raise ValueError("expanded archive exceeds 128 MiB limit")
         names = z.namelist()
+        clean_names = [n.lstrip("/") for n in names]
+        if len(clean_names) != len(set(clean_names)):
+            raise ValueError("duplicate archive members")
+        if any(".." in n.split("/") or "\\" in n for n in names):
+            raise ValueError("unsafe archive member name")
         meta_name = next((n for n in names if n.lstrip("/") == "meta.json"), None)
         if meta_name is None:
             raise ValueError("pak has no meta.json")
         meta = json.loads(z.read(meta_name))
+        if not isinstance(meta, dict):
+            raise ValueError("meta.json must be an object")
         projects: dict[int, bytes] = {}
         sounds: dict[str, bytes] = {}
         for name in names:

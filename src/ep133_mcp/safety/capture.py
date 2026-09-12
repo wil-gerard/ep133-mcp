@@ -164,7 +164,7 @@ def create_backup(device, out, base=None, progress=None) -> dict:
         if candidate is not None:
             pcm = wav_pcm(candidate[1])
             if pcm is not None and zlib.crc32(pcm) == meta.get("crc"):
-                sounds[f"/sounds/{slot:03d} {candidate[0]}.wav"] = candidate[1]
+                sounds[entry] = wav_bytes(pcm, meta)
                 reused += 1
                 if progress:
                     progress({"slot": slot, "action": "reused", "index": index + 1, "total": len(slots)})

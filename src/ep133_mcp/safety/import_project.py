@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import struct
 import tarfile
 import time
 import wave
@@ -35,6 +36,7 @@ from ..protocol import decode as D
 from ..protocol.projects import pack_project, project_entry, read_pak, stored_pads, unpack_project
 from .errors import InvalidDestination, VerificationFailed
 from .install import device_id
+from .recovery import plan_sounds, sound_impact, upload_sounds
 
 CONFIRM_SECONDS = 300
 
@@ -72,7 +74,8 @@ def inspect_ppak(path: str | Path, project: int) -> dict:
         raise InvalidDestination("ppak exceeds the size limit", observed=path.stat().st_size,
                                  expected=f"at most {MAX_PPAK_BYTES} bytes", next_step="This is not a project export.")
     try:
-        meta, projects, sounds = read_pak(path.read_bytes())
+        raw = path.read_bytes()
+        meta, projects, sounds = read_pak(raw)
     except (zipfile.BadZipFile, ValueError, KeyError, OSError) as e:
         raise InvalidDestination("File is not a readable .pak/.ppak", observed=str(e),
                                  next_step="Export the project again.") from e
@@ -100,7 +103,10 @@ def inspect_ppak(path: str | Path, project: int) -> dict:
         problems.append(str(e) + f": {e.detail.get('observed')}")
         included = {}
     referenced = sorted({p["stored_slot"] for p in (summary["pads"] if summary else []) if p["stored_slot"]})
+    if any(not 1 <= slot <= 999 for slot in referenced):
+        problems.append("project references slots outside 1..999")
     out = {
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
         "path": str(path), "project": project, "entry": project_entry(project), "bytes": path.stat().st_size,
         "meta": {k: meta.get(k) for k in ("pak_type", "device_sku", "device_version", "pak_release", "generated_at")},
         "tar_bytes": len(tar) if tar is not None else None,
@@ -122,7 +128,7 @@ def inspect_ppak(path: str | Path, project: int) -> dict:
     return out
 
 
-def check_ppak(path: str | Path, project: int, device) -> dict:
+def check_ppak(path: str | Path, project: int, device, slot_map=None) -> dict:
     """inspect_ppak plus what the device says: active project, slot presence, what would be replaced."""
     report = inspect_ppak(path, project)
     greeting = device.greet()
@@ -143,9 +149,17 @@ def check_ppak(path: str | Path, project: int, device) -> dict:
     if report["slots"]["absent_and_not_included"]:
         report["problems"].append("pads reference slots that are neither on the device nor in the file: "
                                   f"{report['slots']['absent_and_not_included']} - they would import as stale references")
-    if report["slots"]["included_but_already_on_device"]:
-        report["problems"].append("file carries sounds for slots already occupied on the device: "
-                                  f"{report['slots']['included_but_already_on_device']} - Sample Tool would ask to overwrite")
+    if report["included_sounds"] or slot_map:
+        try:
+            _, _, sounds = read_pak(Path(path).expanduser().read_bytes())
+            plan = plan_sounds(sounds, device, slot_map)
+            report["sound_plan"] = [{k: v for k, v in e.items() if k != "pcm"} for e in plan]
+            # Remapping must not change a reference to a different, non-included sound.
+            untouched = set(report["referenced_slots"]) - set(report["included_sounds"])
+            if any(e["slot"] in untouched for e in plan):
+                report["problems"].append("slot_map collides with a referenced sound not carried by this file")
+        except (DeviceError, ValueError, KeyError, wave.Error, EOFError) as e:
+            report["problems"].append(str(e))
     try:
         current = D.decode_project(device.project_tar(project))
         report["would_replace"] = {
@@ -174,33 +188,44 @@ def _project_summary(tar: bytes) -> dict:
 
 
 class Importer:
-    REVERTABLE = ("imported", "imported_with_differences", "write_attempted", "undo_attempted")
+    REVERTABLE = ("imported", "imported_with_differences", "write_attempted", "undo_attempted", "failed", "undo_failed")
 
     def __init__(self, backups, journal):
         self.backups = backups
         self.journal = journal
         self._confirmations = {}
 
-    def import_ppak(self, path, project, backup_id, device, confirm=None):
-        report = check_ppak(path, project, device)
+    def import_ppak(self, path, project, backup_id, device, confirm=None, slot_map=None):
+        report = check_ppak(path, project, device, slot_map)
         if report["problems"]:
             raise InvalidDestination("check_ppak found problems; nothing written", observed=report["problems"],
                                      next_step="Fix the file or pick another project, then retry.")
-        if report["included_sounds"]:
-            raise InvalidDestination("The file carries sounds; only the project TAR is written here",
-                                     observed=sorted(report["included_sounds"]),
-                                     next_step="Upload them with install_sample first, then import a "
-                                               "sound-free copy, or use Sample Tool for this file.")
         live = self.backups.require_current(backup_id, device)
         backup_path = self.backups.path_of(backup_id)
-        _, projects, _ = read_pak(Path(path).expanduser().read_bytes())
+        raw = Path(path).expanduser().read_bytes()
+        if hashlib.sha256(raw).hexdigest() != report["source_sha256"]:
+            raise InvalidDestination("Import file changed during preflight", next_step="Retry with the intended file.")
+        _, projects, sounds = read_pak(raw)
+        plan = plan_sounds(sounds, device, slot_map)
         tar = projects[project]
+        if any(e["source_slot"] != e["slot"] for e in plan):
+            files = unpack_project(tar)
+            mapping = {e["source_slot"]: e["slot"] for e in plan}
+            for pad in stored_pads(tar):
+                name = f"pads/{pad['group'].lower()}/p{pad['pad']:02}"
+                record = bytearray(files[name])
+                struct.pack_into("<H", record, 1, mapping.get(pad["stored_slot"], pad["stored_slot"]))
+                files[name] = bytes(record)
+            tar = pack_project(files)
         impact = {"project": project, "path": report["path"], "tar_bytes": len(tar),
                   "tar_sha256": hashlib.sha256(tar).hexdigest(),
                   "contents": {k: (len(v) if isinstance(v, list) else v)
                                for k, v in report["contents"].items() if k != "members"},
                   "events": sum(p["events"] for p in report["contents"]["patterns"]),
                   "would_replace": report["would_replace"], "referenced_slots": report["referenced_slots"]}
+        impact["sounds"] = sound_impact(plan, live)
+        impact["source_sha256"] = hashlib.sha256(raw).hexdigest()
+        impact["prior_sha256"] = hashlib.sha256(device.project_tar(project)).hexdigest()
         binding = hashlib.sha256(json.dumps({"backup_id": backup_id, "device_id": device_id(live),
                                              "impact": impact}, sort_keys=True).encode()).hexdigest()
         previous = self._confirmations.pop(confirm, None) if confirm else None
@@ -209,15 +234,44 @@ class Importer:
             token = secrets.token_urlsafe(32)
             self._confirmations[token] = (binding, time.monotonic() + CONFIRM_SECONDS)
             return {"status": "needs_confirmation", "impact": impact, "confirm": token,
-                    "undo": f"undo_last_import writes the project back from {backup_path}",
+                    "undo": "undo_last_import restores the exact project preimage; uploaded samples remain",
                     "instruction": "Show this exact impact to the owner; repeat only after approval."}
         device.begin_read()
         prior = device.project_tar(project)
+        if device.active_project() == project or hashlib.sha256(prior).hexdigest() != impact["prior_sha256"]:
+            raise VerificationFailed("Target changed after confirmation", next_step="Inspect and retry preflight.")
+        # Backup verification permits supersets and does not compare every project field.
+        # Keep an exact private preimage so undo never substitutes a different backup project.
+        cache = self.journal.directory.parent / "project-preimages"
+        cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+        prior_path = cache / (impact["prior_sha256"] + ".tar")
+        if prior_path.exists():
+            if prior_path.read_bytes() != prior:
+                raise VerificationFailed("Stored project preimage changed", next_step="Inspect the private recovery cache.")
+        else:
+            import os
+            with prior_path.open("xb") as stream:
+                stream.write(prior)
+                stream.flush()
+                os.fsync(stream.fileno())
+            prior_path.chmod(0o600)
         entry = {"kind": "project", "project": project, "node": 2000 + 1000 * project, "path": report["path"],
                  "tar_bytes": len(tar), "tar_sha256": impact["tar_sha256"], "backup_path": backup_path,
-                 "prior_sha256": hashlib.sha256(prior).hexdigest(), "prior_bytes": len(prior), "status": "pending"}
+                 "prior_sha256": hashlib.sha256(prior).hexdigest(), "prior_path": str(prior_path),
+                 "prior_bytes": len(prior), "status": "pending"}
         record = self.journal.create(device_id(live), backup_id, [entry], operation="import_ppak")
+        record["sounds"] = [e | {"status": "pending"} for e in impact["sounds"]]
+        self.journal.save(record)
         self.backups.invalidate()
+        try:
+            upload_sounds(plan, device, self.journal, record, live)
+            if device.active_project() == project or device.project_tar(project) != prior:
+                raise VerificationFailed("Target project changed during sample upload", next_step="Inspect the journal and take a fresh backup.")
+        except (DeviceError, OSError, ValueError) as e:
+            record["status"] = "partial"
+            entry["failure"] = {"error": type(e).__name__, "message": str(e)}
+            self.journal.save(record)
+            return self._result(record)
         return self._write(record, entry, device, tar, "imported")
 
     def _write(self, record, entry, device, tar, ok_status):
@@ -228,11 +282,15 @@ class Importer:
             device.write_project(project, tar)
             device.begin_read()
             after = device.project_tar(project)
+            entry["read_back_sha256"] = hashlib.sha256(after).hexdigest()
             if after == tar:
                 entry["verified"], entry["differences"] = "bytes", []
             else:
                 want, got = _project_summary(tar), _project_summary(after)
+                wanted_files, actual_files = unpack_project(tar), unpack_project(after)
                 entry["differences"] = [k for k in want if want[k] != got[k]]
+                entry["differences"].extend(name for name in sorted(set(wanted_files) | set(actual_files))
+                                            if wanted_files.get(name) != actual_files.get(name))
                 entry["verified"] = "decoded" if not entry["differences"] else "mismatch"
                 entry["read_back_sha256"] = hashlib.sha256(after).hexdigest()
                 if entry["differences"]:
@@ -253,7 +311,7 @@ class Importer:
     def _result(record):
         entry = record["entries"][0]
         return {**entry, "status": record["status"], "entry_status": entry["status"], "journal_id": record["id"],
-                "transactional": False, "power_cycle_verified": False,
+                "transactional": False, "power_cycle_verified": False, "sounds": record.get("sounds", []),
                 "next_step": "read_project to inspect it; take a fresh backup before another write."}
 
     def undo(self, device):
@@ -272,10 +330,18 @@ class Importer:
             record["status"] = "undo_partial"
             self.journal.save(record)
             return self._result(record)
-        _, projects, _ = read_pak(backup.read_bytes())
-        prior = projects[entry["project"]]
+        device.begin_read()
+        if device.active_project() == entry["project"]:
+            raise InvalidDestination("Cannot undo into the active project", next_step="Select a different project first.")
+        current = device.project_tar(entry["project"])
+        if hashlib.sha256(current).hexdigest() != entry.get("read_back_sha256", entry["tar_sha256"]):
+            raise VerificationFailed("Project changed since import; undo refused", next_step="Inspect current state and use an explicit selective restore.")
+        raw = backup.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != record["backup_id"]:
+            raise VerificationFailed("Undo backup content changed", next_step="Recover the original verified backup.")
+        _, projects, _ = read_pak(raw)
+        prior = Path(entry["prior_path"]).read_bytes() if entry.get("prior_path") else projects[entry["project"]]
         if hashlib.sha256(prior).hexdigest() != entry["prior_sha256"]:
-            entry["undo_note"] = ("the backup's copy of the project is not byte-identical to what the device "
-                                  "held before the import; it is what verify_backup accepted as current")
+            raise VerificationFailed("Project preimage does not match journal", next_step="Recover the original preimage before undoing.")
         self.backups.invalidate()
         return self._write(record, entry, device, prior, "undone")
