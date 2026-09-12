@@ -10,8 +10,12 @@ lives here.
 The output keeps the project TAR's own member list and flavour - every `pads/<group>/pNN`, every
 `patterns/*`, `scenes`, `settings`, `fx_settings`, with each member's original size - and only
 changes contents: pad records keep every byte except the slot (0) and length (0) the device reads
-as "empty", pattern files become their 4-byte header with zero events, each scene chunk's four
-group indices go to 0 (the 04 04 pair an unpopulated chunk carries is kept), and `settings` keeps everything but the BPM. Sounds referenced by the
+as "empty", pattern files become their 4-byte header with zero events, every scene chunk's four
+group indices go to 1 with the selected scene set to 1 (the 04 04 pair is kept), and `settings`
+keeps everything but the BPM. Scenes are the fresh-project state, not zeros: a project the device
+initialised itself (P6, 2026-09-09 backup) holds 01 01 01 01 in all 99 chunks, and no project the
+device ever wrote has chunk 1 zeroed - eight projects blanked with zeroed chunks on 2026-09-12 all
+errored on the device when selected. Sounds referenced by the
 emptied project are not included and nothing in the sample library is touched: emptying a project
 frees no sample space.
 
@@ -46,13 +50,18 @@ def blank_pad(record: bytes) -> bytes:
     return bytes(out)
 
 
+FRESH_CHUNK = bytes([1, 1, 1, 1])   # pattern 1 of every group: what the device writes in a new project
+SELECTED_SCENE_OFFSET = enc.SCENES_HEAD + enc.SCENE_CHUNK * enc.SCENE_SLOTS   # big-endian u32, 1-based
+
+
 def blank_scenes(scenes: bytes) -> bytes:
-    """Every scene chunk back to unpopulated, leaving the head, the trailer and the 04 04 pair."""
+    """Every scene chunk to pattern 1 of each group and the selected scene to 1, leaving the head,
+    the rest of the trailer and each chunk's 04 04 pair."""
     out = bytearray(scenes)
     for scene in range(1, enc.SCENE_SLOTS + 1):
-        if scene_populated(scenes, scene):
-            offset = enc.scene_chunk_offset(scene)
-            out[offset:offset + 4] = bytes(4)
+        offset = enc.scene_chunk_offset(scene)
+        out[offset:offset + 4] = FRESH_CHUNK
+    struct.pack_into(">I", out, SELECTED_SCENE_OFFSET, 1)
     return bytes(out)
 
 
@@ -72,7 +81,7 @@ def blank_project(tar: bytes, bpm: float | None = None) -> tuple[bytes, dict]:
         before = files["scenes"]
         files["scenes"] = blank_scenes(before)
         report["scenes_cleared"] = sum(1 for scene in range(1, enc.SCENE_SLOTS + 1)
-                                       if scene_populated(before, scene))
+                                       if before[enc.scene_chunk_offset(scene):][:4] != FRESH_CHUNK)
     if bpm is not None and "settings" in files:
         files["settings"] = enc.patch_bpm(files["settings"], bpm)
     return pack_project(files), report

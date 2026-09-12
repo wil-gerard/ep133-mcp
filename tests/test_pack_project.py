@@ -224,7 +224,8 @@ def test_blank_project_tool(tmp_path, capsys):
 
     files = minimal_project(pad7_slot=16)
     files["patterns/a01"] = enc.encode_pattern(2, {7: "x..." * 8})
-    files["scenes"] = enc.patch_scene(bytes(712), 4, {"A": 1, "B": 1, "C": 1, "D": 1})
+    files["scenes"] = enc.patch_scene(bytes(712), 4, {"A": 3, "B": 1, "C": 1, "D": 1})
+    files["scenes"] = files["scenes"][:601] + (4).to_bytes(4, "big") + files["scenes"][605:]   # selected scene 4
     source = tmp_path / "backup.pak"
     with zipfile.ZipFile(source, "w") as z:
         z.writestr("/meta.json", json.dumps({"pak_type": "user", "device_version": "2.5.1"}))
@@ -233,7 +234,7 @@ def test_blank_project_tool(tmp_path, capsys):
     out = tmp_path / "blank.ppak"
     assert blank_project.main([str(source), "--project", "2", "--out", str(out), "--bpm", "96"]) == 0
     text = capsys.readouterr().out
-    assert "1 pads cleared" in text and "1 patterns emptied" in text and "1 scenes cleared" in text
+    assert "1 pads cleared" in text and "1 patterns emptied" in text and "99 scenes cleared" in text
 
     written = P.unpack_project(P.read_pak(out.read_bytes())[1][2])
     assert set(written) == set(files)                       # same member list, same flavour
@@ -244,7 +245,12 @@ def test_blank_project_tool(tmp_path, capsys):
         elif name.startswith("patterns/"):
             assert len(data) == 4 and data[2] == 0 and data[1] >= 1
     assert enc.decode_bpm(written["settings"]) == pytest.approx(96.0)
-    assert not any(blank_project.scene_populated(written["scenes"], n) for n in range(1, 100))
+    # The fresh-project state, not zeros: every chunk is pattern 1 of each group and scene 1 is
+    # selected, because the device rejects a project whose selected scene chunk is zeroed.
+    assert all(enc.decode_scene(written["scenes"], n) == {"A": 1, "B": 1, "C": 1, "D": 1, "num": 4, "den": 4}
+               for n in (4,))
+    assert all(written["scenes"][enc.scene_chunk_offset(n):][:4] == b"\x01\x01\x01\x01" for n in range(1, 100))
+    assert int.from_bytes(written["scenes"][601:605], "big") == 1
     assert written["scenes"][enc.scene_chunk_offset(4) + 4:enc.scene_chunk_offset(4) + 6] == b"\x04\x04"
     assert P.read_pak(out.read_bytes())[2] == {}            # no sounds: nothing is deleted either
 
