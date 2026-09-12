@@ -289,3 +289,27 @@ def test_wav_records_a_tempo():
     chunks = wav_chunks(wav_bytes(b'\x00' * 4, BASE_META | {'sound.bpm': 90.0}))
     assert 'acid' in chunks and struct.unpack_from('<f', chunks['acid'], 20)[0] == pytest.approx(90.0)
     assert b'"sound.bpm":90,' in chunks['LIST']      # whole numbers are written as integers
+
+
+def test_backup_stays_valid_while_the_device_only_loses_content(tmp_path):
+    path, device = make_backup(tmp_path), fake_device()
+    registry = BackupRegistry()
+    result = registry.verify(path, device)
+    assert result['status'] == 'current'
+    # Our own delete removed the only slot: the backup still holds it - a superset.
+    device.slot_exists.side_effect = lambda slot: False
+    live = registry.require_current(result['backup_id'], device)
+    assert live['slots'] == set()
+    assert registry.verify(path, device)['status'] == 'superset'
+    # A pad cleared since is the same story...
+    original = device.project_tar.return_value
+    cleared = bytearray(original)
+    cleared[513:515] = (0).to_bytes(2, 'little')
+    cleared[520:524] = (0).to_bytes(4, 'little')
+    device.project_tar.return_value = bytes(cleared)
+    assert registry.verify(path, device)['status'] in ('superset', 'current')
+    # ...but a slot the device has and the backup lacks is content a restore would lose.
+    device.slot_exists.side_effect = lambda slot: slot == 17
+    assert registry.verify(path, device)['status'] == 'stale'
+    with pytest.raises(BackupStale):
+        registry.require_current(result['backup_id'], device)

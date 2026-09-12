@@ -138,6 +138,23 @@ def differences(backup: Backup, live: dict) -> list[dict]:
     return result
 
 
+def covers_device(diff: list[dict]) -> bool:
+    """True when every difference is content the backup holds and the device has since lost.
+
+    A slot deleted or a pad cleared after the backup leaves the backup a superset of the device:
+    restoring it still brings back everything the device holds now, so it remains a valid gate
+    for the next write. A slot or assignment the device has and the backup lacks does not - that
+    is content a restore would lose. The owner asked for this after a session that spent a
+    50-second backup between every one of ten writes (2026-09-12)."""
+    for d in diff:
+        if d['field'] == 'library_slots' and not d['only_on_device']:
+            continue
+        if d['field'] == 'stored_pad' and d['device']['slot'] == 0:
+            continue
+        return False
+    return True
+
+
 class BackupRegistry:
     def __init__(self, max_age_seconds: float = 86400):
         if not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
@@ -154,9 +171,10 @@ class BackupRegistry:
         if age < -60 or age > self.max_age_seconds:
             diff.append({'field': 'backup_age_seconds', 'observed': age,
                          'maximum': self.max_age_seconds})
-        if not diff:
+        status = 'current' if not diff else 'superset' if covers_device(diff) else 'stale'
+        if status != 'stale':
             self._verified[backup.backup_id] = (backup.path, live['serial'])
-        return {'status': 'stale' if diff else 'current', 'backup_id': backup.backup_id,
+        return {'status': status, 'backup_id': backup.backup_id,
                 'differences': diff, 'pads_compared': 432,
                 'scope': 'SKU/OS, library occupancy and stored pad slot/length; not audio content'}
 
@@ -171,7 +189,8 @@ class BackupRegistry:
         live = snapshot(device)
         age = time.time() - backup.modified_at
         diff = differences(backup, live)
-        if backup.backup_id != backup_id or live['serial'] != serial or diff or not -60 <= age <= self.max_age_seconds:
+        if (backup.backup_id != backup_id or live['serial'] != serial or not covers_device(diff)
+                or not -60 <= age <= self.max_age_seconds):
             raise BackupStale('Backup or device changed since verification', observed=diff,
                               next_step='Create and verify a fresh Sample Tool backup.')
         self._verified[backup_id] = entry

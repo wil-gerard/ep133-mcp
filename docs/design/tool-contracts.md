@@ -71,10 +71,16 @@ server's job is to prove it is current:
 2. Library slot set in the archive equals the slot set on the device.
 3. All 432 stored pad records, read from the device's project TARs, equal the
    archive's — byte-for-byte on slot and length. Not `sym`; stored fields.
-4. Returns `current` / `stale` with the exact differences, and a `backup_id`
-   (SHA-256) that write tools must echo.
+4. Returns `current` / `superset` / `stale` with the exact differences, and a
+   `backup_id` (SHA-256) that write tools must echo. `superset` means the
+   device has only lost content since the backup - slots deleted, pads
+   cleared - so restoring it still brings back everything the device holds;
+   it stays valid for writes. Content the device has and the backup lacks is
+   `stale`.
 
 A write tool refuses if the backup is stale or older than a configurable age.
+The superset rule exists so a run of our own journalled writes (empty eight
+projects, delete forty slots) needs one verified backup, not one per step.
 This makes the device-owner responsible for one thing — running Sample Tool
 backup — and the server responsible for proving it was worth doing.
 

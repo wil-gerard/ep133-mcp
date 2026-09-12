@@ -215,7 +215,9 @@ def read_project(project: int, source: str | None = None) -> dict[str, Any]:
     name="verify_backup",
     description=(
         "Validate a full Sample Tool .pak against device SKU/OS, library occupancy "
-        "and all 432 stored pad slot/length fields. Read-only; returns current/stale "
+        "and all 432 stored pad slot/length fields. Read-only; returns current, superset (the "
+        "device has only lost content since - slots deleted, pads cleared - so the backup still "
+        "restores everything on it and stays valid for writes) or stale, with the differences, "
         "and a SHA-256 backup_id. Does not compare audio content or prove full restore."
     ),
 )
