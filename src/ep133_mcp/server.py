@@ -567,7 +567,10 @@ def extract_kit(clip: str, want: list[str] | None = None, separation: str = "aut
         "bass and melodic pads are not transcribed. The grid follows the tracked beats "
         "from the analyzed downbeat; pass downbeat_s to correct the phase when the groove "
         "comes out rotated by a beat (likely with the librosa fallback). bars is 1, 2 or 4, "
-        "fitted to the clip unless given; onsets outside the bars fold back. Reports the "
+        "fitted to the clip unless given; a longer clip folds onto the pattern and its bars vote, "
+        "so the loop is kept and one-off fills and intro ticks are not (each pad reports its "
+        "class and the role it plays; with 'bands' each stream goes to the pad whose slice "
+        "sounds like it, which is not always the pad extract_kit named for it). Reports the "
         "quantization error in ms, and a tick_pattern holding the same hits at the tick each "
         "onset fell on with a velocity 40..127 from its onset strength (loudest hit of each class "
         "at 127), in the events shape generate_ppak takes - prefer it over pattern when "
@@ -575,7 +578,9 @@ def extract_kit(clip: str, want: list[str] | None = None, separation: str = "aut
         "drums stem one pad; 'bands' detects kick, snare and hat independently in their own "
         "frequency bands, so a kick under a hat is both - much better on real material where "
         "hits coincide, and the only way to recover a four-on-the-floor kick, but not yet exact "
-        "on the synthetic fixture. min_strength (0..1) drops onsets weaker than that. "
+        "on the synthetic fixture. min_strength (0..1) drops onsets weaker than that, relative to "
+        "the loudest of the stem ('classify') or of each band ('bands', which already drops "
+        "onsets under 0.15-0.25 per band, so smaller values change nothing). "
         "Every hit is probable. Writes kit/groove.json. No device I/O. Needs the audio extra."
     ),
 )
