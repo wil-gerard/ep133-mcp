@@ -379,10 +379,11 @@ def chop_sample(path: str, project: int, group: str, pads: list[int], slices: An
 @server.tool(
     name="undo_last_chop",
     description=(
-        "Revert the pads of the latest chop_sample journal: each pad that still stores the chop's "
-        "slot gets its prior sym and, where the record held them, its prior trim and playmode "
-        "written back, then its stored record is read to prove it. Reports anything it cannot "
-        "restore. The uploaded slot stays in the library; delete_samples removes it."
+        "Revert the newest chop_sample journal that still has pads to revert; calling it again "
+        "reaches the next older one. Each pad that still stores the chop's slot gets its prior "
+        "sym and, where the record held them, its prior trim and playmode written back, then its "
+        "stored record is read to prove it. Reports anything it cannot restore. The uploaded slot "
+        "stays in the library; delete_samples removes it."
     ),
 )
 def undo_last_chop() -> dict[str, Any]:

@@ -217,3 +217,20 @@ def test_undo_skips_pads_that_changed_since(setup):
 def test_nothing_to_undo(setup):
     d, chopper, _ = setup
     assert chopper.undo(d) == {"status": "nothing_to_undo"}
+
+
+def test_undo_reaches_the_older_journal_once_the_newest_is_undone(setup):
+    d, chopper, wav = setup
+    chopper.chop(wav, 2, "D", [1, 2], {"mode": "equal"}, "backup", d)
+    d.pads[2, "D", 1] = (16, 500)                      # D01 changed since: the undo refuses it
+    older = chopper.undo(d)
+    assert older["status"] == "undo_partial" and d.pads[2, "D", 2] == (0, 0)
+    d.pads[2, "D", 1] = (1, 1000)                      # put back: D01 is revertable again
+    chopper.chop(wav, 2, "B", [2, 3], {"mode": "equal"}, "backup", d)
+    first = chopper.undo(d)
+    assert first["status"] == "undone" and first["library_slot_left_in_place"] == 2
+    assert d.pads[2, "B", 2] == (0, 0) and d.pads[2, "B", 3] == (0, 0)
+    second = chopper.undo(d)
+    assert second["journal_id"] == older["journal_id"] and second["status"] == "undone"
+    assert d.pads[2, "D", 1] == (0, 0)
+    assert chopper.undo(d)["journal_id"] == first["journal_id"]

@@ -258,19 +258,24 @@ class Chopper:
                             "re-read after its writes",
                 "next_step": "Play the pads to check the slices; take a fresh backup before another write."}
 
+    REVERTABLE = ("chopped", "chopped_with_differences", "trim_attempted", "assignment_attempted", "undo_attempted")
+
     def undo(self, device):
         greeting = device.greet()
         identity = device_id({"sku": greeting.sku, "serial": greeting.serial})
-        record = self.journal.latest(identity, operation="chop_sample")
-        if record is None:
+        records = self.journal.records(identity, operation="chop_sample")
+        if not records:
             return {"status": "nothing_to_undo"}
-        if record["status"] in ("undone",):
-            return self._result(record)
+        # Walk newest to oldest and revert the first chop that still has pads to revert. Stopping
+        # at the newest record once it was undone left every older chop unreachable (observed
+        # 2026-09-12: journal fd6d507e shadowed adb595c9's three remaining pads).
+        record = next((r for r in records
+                       if any(e["kind"] == "pad" and e["status"] in self.REVERTABLE for e in r["entries"])), None)
+        if record is None:
+            return self._result(records[0])
         self.backups.invalidate()
         for entry in reversed(record["entries"]):
-            if entry["kind"] != "pad" or entry["status"] not in ("chopped", "chopped_with_differences",
-                                                                 "trim_attempted", "assignment_attempted",
-                                                                 "undo_attempted"):
+            if entry["kind"] != "pad" or entry["status"] not in self.REVERTABLE:
                 continue
             project, group, pad = entry["project"], entry["group"], entry["pad"]
             prior = (entry["prior_slot"], entry["prior_length"])

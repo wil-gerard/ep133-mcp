@@ -44,8 +44,8 @@ class Journal:
         self.save(record)
         return record
 
-    def latest(self, device_id, operation='install_kit'):
-        """The newest record of one operation for this device.
+    def records(self, device_id, operation='install_kit'):
+        """Every record of one operation for this device, newest first.
 
         Operations share the journal directory, so a delete written after an install must not
         shadow it: undo_last_install reverts pad writes and has nothing to say about a deleted
@@ -56,7 +56,11 @@ class Journal:
                 record = json.loads(path.read_text())
                 if record['device_id'] == device_id and record.get('operation', 'install_kit') == operation:
                     records.append(record)
-            return max(records, key=lambda r: r['created_at'], default=None)
+            return sorted(records, key=lambda r: r['created_at'], reverse=True)
         except (OSError, ValueError, KeyError, TypeError) as e:
             raise JournalError('Could not read install journal', observed=str(e),
                                next_step='Inspect the private journal directory before undoing changes.') from e
+
+    def latest(self, device_id, operation='install_kit'):
+        """The newest record of one operation for this device, or None."""
+        return next(iter(self.records(device_id, operation)), None)
