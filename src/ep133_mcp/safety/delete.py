@@ -115,7 +115,8 @@ class Deleter:
                 gone = device.delete_slot(slot)
             except Exception as e:                       # noqa: BLE001 - reported, never swallowed
                 entry["status"] = "failed"
-                entry["failure"] = {"error": type(e).__name__, "message": str(e)}
+                entry["failure"] = {"error": type(e).__name__, "message": str(e),
+                                    **getattr(e, "detail", {})}   # status + the device's reason string
                 self.journal.save(record)
                 results.append(dict(entry))
                 record["status"] = "partial"

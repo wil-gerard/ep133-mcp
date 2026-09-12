@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from ep133_mcp.device import DeviceError
+from ep133_mcp.device import DeviceError, DeviceRejected
 from ep133_mcp.safety.delete import Deleter, referencing_pads
 from ep133_mcp.safety.errors import InvalidDestination
 from ep133_mcp.safety.journal import Journal
@@ -30,7 +30,7 @@ class DeletingDevice(FakeDevice):
     def delete_slot(self, slot):
         self.deletes.append(slot)
         if slot == self.fail:
-            raise DeviceError('failed to delete')
+            raise DeviceRejected('device rejected the delete', slot=slot, status=1, reason='failed to delete')
         if slot in self.ignore:
             return False
         self.slots.discard(slot)
@@ -118,7 +118,8 @@ def test_a_failure_stops_and_is_reported(setup):
     result = approve(deleter, d, [15, 16, 18])
     assert result['status'] == 'partial'
     assert [e['status'] for e in result['entries']] == ['deleted', 'failed']
-    assert result['entries'][1]['failure']['message'] == 'failed to delete'
+    assert result['entries'][1]['failure']['reason'] == 'failed to delete'
+    assert result['entries'][1]['failure']['status'] == 1                 # the device's own status/reason survive
     assert 18 in d.slots and d.deletes == [15, 16]      # stopped before the third
 
 
