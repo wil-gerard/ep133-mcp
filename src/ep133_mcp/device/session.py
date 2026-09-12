@@ -159,6 +159,19 @@ class DeviceSession:
 
     # ---- channel messages ------------------------------------------------
 
+    def send_midi_note(self, channel: int, note: int, velocity: int, on: bool) -> None:
+        """One bounded channel message; the audition scheduler owns duration and cleanup."""
+        if type(channel) is not int or not 1 <= channel <= 16 or type(note) is not int or not 0 <= note <= 127:
+            raise ValueError("Invalid MIDI channel or note")
+        if type(velocity) is not int or not 0 <= velocity <= 127 or type(on) is not bool:
+            raise ValueError("Invalid MIDI velocity or note state")
+        if self._out is None:
+            raise DeviceUnavailable("session not open")
+        import mido
+        with self._lock:
+            self._out.send(mido.Message("note_on" if on else "note_off", channel=channel - 1,
+                                       note=note, velocity=velocity))
+
     def send_note(self, channel: int, note: int, velocity: int = 100, duration_s: float = 0.25) -> dict:
         """A MIDI note on the device's own port, held for duration_s, then released.
 
@@ -180,8 +193,10 @@ class DeviceSession:
         with self._lock:
             started = time.monotonic()
             self._out.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
-            time.sleep(duration_s)
-            self._out.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
+            try:
+                time.sleep(duration_s)
+            finally:
+                self._out.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
             held = time.monotonic() - started
         return {"channel": channel, "note": note, "velocity": velocity, "held_s": round(held, 3)}
 

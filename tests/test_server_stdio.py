@@ -30,7 +30,8 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "chop_sample", "undo_last_chop", "clear_pads", "undo_last_clear", "import_ppak", "undo_last_import", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
-                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak", "diff_project", "play_note", "list_files", "stat_file"}
+                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak", "diff_project", "play_note", "list_files", "stat_file", "export_project", "list_samples", "sample_usage",
+                     "restore_samples", "restore_project", "set_active_project", "play_pattern", "stop_playback", "playback_status"}
 
 
 @pytest.mark.asyncio

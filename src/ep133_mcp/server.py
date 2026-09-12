@@ -8,6 +8,7 @@ Writes require current backups and complete preflight (docs/design/tool-contract
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ import sys
 import tarfile
 import threading
 import zipfile
+import wave
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -38,6 +40,9 @@ from .safety.import_project import Importer, check_ppak as _check_ppak
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.library import export_project as _export_project, list_samples as _list_samples
+from .midi.playback import Playback, compile_pattern
+from .safety.selection import ProjectSelector
+from .safety.recovery import Restorer
 from .safety.journal import Journal
 from .safety.params import ParamWriter
 from .safety.preflight import validate_destination
@@ -72,6 +77,10 @@ _params = ParamWriter(_backups, _journal)
 _chopper = Chopper(_backups, _journal)
 _clearer = Clearer(_backups, _journal)
 _importer = Importer(_backups, _journal)
+_restorer = Restorer(_backups, _journal)
+_selector = ProjectSelector(_backups, _journal)
+_playback = Playback()
+atexit.register(_playback.stop)
 
 
 def _device() -> DeviceSession:
@@ -755,12 +764,15 @@ def diff_project(project: int, old: str, new: str | None = None) -> dict[str, An
         "status is ok or problems with each problem spelled out."
     ),
 )
-def check_ppak(path: str, project: int) -> dict[str, Any]:
+def check_ppak(path: str, project: int, slot_map: dict[str, int] | None = None) -> dict[str, Any]:
     try:
         with _operation_lock:
-            return _check_ppak(path, project, _device())
+            return _check_ppak(path, project, _device(), slot_map)
     except DeviceError as e:
         return _error(e)
+
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
 
 
 @server.tool(
@@ -769,7 +781,7 @@ def check_ppak(path: str, project: int) -> dict[str, Any]:
         "Write a .ppak's project TAR to project N (1..9) over SysEx, the way Sample Tool imports "
         "it (its uploadProjectArchive: FILE_PUT_META at the project node, data pages, terminator). "
         "Runs check_ppak first and refuses on any problem, including N being the active project; "
-        "files that carry sounds are refused (install_sample them first). Requires a verified "
+        "included samples are verified/reused or uploaded first; slot_map explicitly remaps collisions. Requires a verified "
         "current backup_id and returns needs_confirmation with the file's bpm/pads/patterns/scenes "
         "and what project N holds now; show that to the owner and repeat with confirm. The project "
         "is read back afterwards and compared byte-for-byte, then field-by-field if the bytes "
@@ -777,12 +789,16 @@ def check_ppak(path: str, project: int) -> dict[str, Any]:
         "Power-cycle persistence is a separate check."
     ),
 )
-def import_ppak(path: str, project: int, backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+def import_ppak(path: str, project: int, backup_id: str, confirm: str | None = None,
+                slot_map: dict[str, int] | None = None) -> dict[str, Any]:
     try:
         with _operation_lock:
-            return _importer.import_ppak(path, project, backup_id, _device(), confirm)
+            return _importer.import_ppak(path, project, backup_id, _device(), confirm, slot_map)
     except DeviceError as e:
         return _error(e)
+
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
 
 
 @server.tool(
@@ -800,6 +816,103 @@ def undo_last_import() -> dict[str, Any]:
     except DeviceError as e:
         return _error(e)
 
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
+
+@server.tool(description="Select the active project explicitly. Requires a current backup and confirmation, journals the previous project and verifies the new active value. Hardware acceptance pending.")
+def set_active_project(project: int, backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _selector.select(project, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(description="Audition simultaneous generate_ppak steps patterns over live MIDI, up to 120 seconds. Requires explicit routing entries {group,pad,channel,note}, since global MIDI routing is not readable. Checks actual active-project assignments. Device must not be recording. Returns immediately; use stop_playback or playback_status. Soft o hits use velocity 60; imported patterns currently encode them as 100.")
+def play_pattern(project: int, patterns: list[dict], routing: list[dict], bpm: float,
+                 repeats: int = 1) -> dict[str, Any]:
+    try:
+        validate_destination(project, "A", 1)
+        events, duration, pads = compile_pattern(patterns, routing, bpm, repeats)
+        with _operation_lock:
+            d = _device()
+            d.greet()
+            d.begin_read()
+            if d.active_project() != project:
+                raise ValueError("Audition project must be active")
+            assignments = []
+            for group, pad in pads:
+                meta = d.pad_metadata(project, group, pad)
+                if not meta.get("sym"):
+                    raise ValueError(f"{group}{pad} is empty or stale")
+                assignments.append({"group": group, "pad": pad, "slot": meta["sym"]})
+            def verify():
+                d.begin_read()
+                if d.active_project() != project or any(d.pad_metadata(project, a["group"], a["pad"]).get("sym") != a["slot"] for a in assignments):
+                    raise ValueError("Project or assignments changed before playback")
+            return _playback.start(d, _operation_lock, events, duration, assignments, verify)
+    except DeviceError as e:
+        return _error(e)
+    except (ValueError, TypeError, KeyError) as e:
+        return {"error": "InvalidInput", "message": str(e)}
+
+
+@server.tool(description="Cancel the live audition and release its active notes. Available during playback without waiting for the device-operation lock.")
+def stop_playback() -> dict[str, Any]:
+    return _playback.stop()
+
+
+@server.tool(description="Read live audition progress and any MIDI or note-off cleanup failure. No device I/O.")
+def playback_status() -> dict[str, Any]:
+    return _playback.status()
+
+
+@server.tool(description="Restore selected samples from a backup to their original slots. Requires a current backup_id and confirmation of affected references. Refuses occupied slots unless audio and metadata match exactly. Reports partial failures; no automatic deletion.")
+def restore_samples(source: str, slots: list[int], backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _restorer.restore(source, slots, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
+
+@server.tool(description="Restore one non-active project from a local backup, optionally including its referenced samples. Uses import preflight, confirmation, journal and read-back; other projects remain intact. slot_map explicitly remaps included samples.")
+def restore_project(source: str, project: int, backup_id: str, confirm: str | None = None,
+                    include_samples: bool = True, slot_map: dict[str, int] | None = None) -> dict[str, Any]:
+    import hashlib
+    from .protocol.projects import read_pak, build_ppak, project_meta, referenced_sounds
+    try:
+        with _operation_lock:
+            raw = Path(source).expanduser().read_bytes()
+            meta, projects, sounds = read_pak(raw)
+            if project not in projects or type(project) is not int:
+                raise ValueError("Project absent from source")
+            selected = referenced_sounds(projects[project], sounds) if include_samples else {}
+            if include_samples:
+                from .safety.library import references, sound_index
+                missing = set(references({project: projects[project]})) - set(sound_index(selected))
+                if missing:
+                    raise ValueError(f"Referenced samples absent from restore source: {sorted(missing)}")
+            data = build_ppak(project, projects[project], project_meta(meta, now=0), selected, now=315532800)
+            cache = _journal.directory.parent / "restore-packages"
+            cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+            path = cache / (hashlib.sha256(data).hexdigest() + ".ppak")
+            if path.exists():
+                if path.read_bytes() != data:
+                    raise ValueError("Cached restore package changed")
+            else:
+                with path.open("xb") as stream:
+                    stream.write(data)
+                path.chmod(0o600)
+            return _importer.import_ppak(path, project, backup_id, _device(), confirm, slot_map)
+    except DeviceError as e:
+        return _error(e)
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
 
 @server.tool(description="Export one project from a local backup to a portable .ppak, including only referenced samples. Preserves original WAV metadata. No device writes; refuses missing dependencies and existing outputs.")
 def export_project(source: str, project: int, out: str, include_samples: bool = True) -> dict[str, Any]:
@@ -807,7 +920,7 @@ def export_project(source: str, project: int, out: str, include_samples: bool = 
         return _export_project(source, project, out, include_samples)
     except DeviceError as e:
         return _error(e)
-    except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as e:
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
         return {"error": type(e).__name__, "message": str(e)}
 
 
@@ -818,7 +931,7 @@ def list_samples(source: str | None = None) -> dict[str, Any]:
             return _list_samples(None if source else _device(), source)
     except DeviceError as e:
         return _error(e)
-    except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as e:
+    except (OSError, ValueError, EOFError, wave.Error, zipfile.BadZipFile, tarfile.TarError) as e:
         return {"error": type(e).__name__, "message": str(e)}
 
 
