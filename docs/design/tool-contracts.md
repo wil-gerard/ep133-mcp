@@ -133,6 +133,17 @@ full-access epic is proven against, so it must never hide a field the device
 added or dropped. Destination is validated before any I/O; `sym` 0 means no
 slot read is attempted. Nothing is cached.
 
+### `read_project(project, source=None)` — read-only
+The whole project decoded: bpm, 48 stored pad records, every pattern file as
+note events (`pad, tick, duration, note, byte4, byte7`) with type-1 fader
+automation kept in a separate `automation` list and any other event type
+reported raw, the scenes file, and the raw `settings` / `fx_settings` floats.
+`source` decodes a `.pak`/`.ppak` on disk instead of the device. No backup
+gate. The decoders in `protocol/decode.py` are the same ones
+`tools/pattern_decode.py` wraps, so the CLI and the tool cannot disagree.
+Field status is whatever `docs/research/pattern-encoding.md` says; the tool
+does not upgrade "probable" to "verified".
+
 ### `verify_backup(path)` — read-only
 As above. Returns `backup_id`.
 
