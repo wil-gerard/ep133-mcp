@@ -232,3 +232,60 @@ def test_create_backup_records_a_slot_it_could_not_read(tmp_path):
     assert report['problems'] == [{'slot': 9, 'problem': 'DeviceError',
                                    'message': 'slot read does not match its stored crc'}]
     assert report['slots_read'] == 1
+
+
+def wav_chunks(data):
+    import struct
+    out, i = {}, 12
+    while i + 8 <= len(data):
+        cid = data[i:i + 4].decode('latin1')
+        size = struct.unpack_from('<I', data, i + 4)[0]
+        out[cid] = data[i + 8:i + 8 + size]
+        i += 8 + size + (size & 1)
+    return out
+
+
+BASE_META = {'format': 's16', 'channels': 1, 'samplerate': 46875, 'sound.rootnote': 60,
+             'sound.playmode': 'oneshot', 'sound.pitch': 0.0, 'sound.pan': 0, 'sound.amplitude': 100,
+             'envelope.attack': 0, 'envelope.release': 255, 'time.mode': 'off',
+             'sample.start': 0, 'sample.end': 2, 'sound.loopstart': -1, 'sound.loopend': -1,
+             'sound.bpm': 0.0}
+
+
+def test_wav_carries_the_devices_own_settings():
+    """A bare 44-byte header loses every sample's playmode, tuning, envelope and loop on restore.
+
+    These chunk shapes were read out of a Sample Tool backup and reproduce all 56 of its WAVs
+    byte for byte."""
+    import struct
+    from ep133_mcp.safety.capture import wav_bytes
+
+    chunks = wav_chunks(wav_bytes(b'\x01\x02\x03\x04', BASE_META))
+    assert list(chunks) == ['fmt ', 'smpl', 'LIST', 'data']          # no acid without a bpm
+    assert chunks['data'] == b'\x01\x02\x03\x04'
+    assert struct.unpack_from('<I', chunks['smpl'], 12)[0] == 60     # MIDI unity note
+    assert struct.unpack_from('<I', chunks['smpl'], 28)[0] == 0      # no loops
+    assert chunks['LIST'][:8] == b'INFOTNGE'
+    payload = chunks['LIST'][12:]
+    assert b'"sound.playmode":"oneshot"' in payload and b'"sound.pitch":0' in payload
+    assert len(payload) % 4 == 0 and payload.endswith(b'\x00')       # terminated, then padded to 4
+
+
+def test_wav_records_a_loop_that_starts_at_zero():
+    """sound.loopstart 0 is a real loop point; testing it for truthiness drops the loop."""
+    import struct
+    from ep133_mcp.safety.capture import wav_bytes
+
+    chunks = wav_chunks(wav_bytes(b'\x00' * 8, BASE_META | {'sound.loopstart': 0, 'sound.loopend': 3}))
+    assert len(chunks['smpl']) == 60 and struct.unpack_from('<I', chunks['smpl'], 28)[0] == 1
+    assert struct.unpack_from('<2I', chunks['smpl'], 44) == (0, 3)
+    assert chunks['LIST'][12:].startswith(b'{"sound.loopstart":0,"sound.loopend":3,')
+
+
+def test_wav_records_a_tempo():
+    import struct
+    from ep133_mcp.safety.capture import wav_bytes
+
+    chunks = wav_chunks(wav_bytes(b'\x00' * 4, BASE_META | {'sound.bpm': 90.0}))
+    assert 'acid' in chunks and struct.unpack_from('<f', chunks['acid'], 20)[0] == pytest.approx(90.0)
+    assert b'"sound.bpm":90,' in chunks['LIST']      # whole numbers are written as integers

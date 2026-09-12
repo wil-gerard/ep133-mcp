@@ -20,6 +20,7 @@ from pathlib import Path
 import logging
 import zlib
 import queue
+import struct
 import threading
 import time
 import tarfile
@@ -254,6 +255,11 @@ class DeviceSession:
         The same pair that reads a project TAR also reads a sample slot: slot 17 came back as
         37,500 bytes of `017.pcm` whose crc32 equalled the slot metadata's crc, and byte for byte
         equal to the WAV payload Sample Tool put in its own backup. Roughly 25 KiB/s."""
+        # A read left open and not drained to EOF wedges the interface: opening project 2 and
+        # then project 3 without draining the first stopped the device answering anything,
+        # GREET included, until a power cycle. Re-initialising read mode before each open keeps
+        # one open read at a time even when a caller abandons one.
+        self.begin_read()
         r = self.request(CMD_FILE, struct.pack(">BBHI", 3, 0, file_id, 0))
         if not r.ok:
             raise DeviceRejected("file read open rejected", file_id=file_id, status=r.status)

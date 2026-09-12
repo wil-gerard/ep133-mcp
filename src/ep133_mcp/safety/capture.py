@@ -22,6 +22,7 @@ import io
 import json
 from pathlib import Path
 import re
+import struct
 import time
 import wave
 import zipfile
@@ -34,21 +35,74 @@ from .errors import InvalidBackup
 SOUND_NAME = re.compile(r"^/sounds/(\d+) (.*)\.wav$")
 
 
+# The device's own WAVs carry its per-sample settings, so a backup that writes a bare 44-byte
+# header silently loses every sample's playmode, tuning, envelope and loop on restore. These
+# were read out of a Sample Tool backup chunk by chunk and reproduce it byte for byte.
+TNGE_ORDER = ("sound.loopstart", "sound.loopend", "sound.playmode", "sound.rootnote", "sound.bpm",
+              "sound.pitch", "sound.pan", "sound.amplitude", "envelope.attack", "envelope.release",
+              "time.mode", "sample.start", "sample.end")
+
+
+def _scalar(value):
+    """The device reports whole numbers as floats; its own JSON writes them as integers."""
+    return int(value) if isinstance(value, float) and value == int(value) else value
+
+
+def _riff(chunk_id: bytes, body: bytes) -> bytes:
+    return chunk_id + struct.pack("<I", len(body)) + body + (b"\0" if len(body) % 2 else b"")
+
+
+def loop_points(meta: dict) -> tuple[int, int] | None:
+    """(start, end) when the slot loops. A loop starting at 0 is real, so never test truthiness."""
+    start, end = meta.get("sound.loopstart"), meta.get("sound.loopend")
+    if start is None or end is None or start < 0 or end < 0:
+        return None
+    return int(start), int(end)
+
+
+def tnge_json(meta: dict) -> bytes:
+    """The device's settings blob, in the key order its own files use."""
+    looped = loop_points(meta) is not None
+    fields = {}
+    for key in TNGE_ORDER:
+        if key in ("sound.loopstart", "sound.loopend") and not looped:
+            continue
+        if key == "sound.bpm" and not meta.get(key):
+            continue
+        if key in meta:
+            fields[key] = _scalar(meta[key])
+    return json.dumps(fields, separators=(",", ":")).encode()
+
+
+def smpl_chunk(meta: dict) -> bytes:
+    """Standard sampler chunk: unity note, plus one forward loop when the slot has one."""
+    loop = loop_points(meta)
+    body = struct.pack("<9I", 0, 0, 0, int(meta.get("sound.rootnote") or 60), 0, 0, 0, int(loop is not None), 0)
+    if loop is not None:
+        body += struct.pack("<6I", 1, 0, loop[0], loop[1], 0, 0)
+    return body
+
+
 def wav_bytes(pcm: bytes, meta: dict) -> bytes:
-    """Wrap raw device PCM in the WAV container Sample Tool's backups use."""
-    channels = int(meta.get("channels") or 1)
-    rate = int(meta.get("samplerate") or 46875)
+    """Wrap raw device PCM in the WAV container Sample Tool's backups use, settings and all."""
     fmt = str(meta.get("format") or "s16")
     if fmt != "s16":
         raise InvalidBackup("Unsupported sample format", observed=fmt, expected="s16",
                             next_step="Report the slot; only 16-bit PCM has been seen on this device.")
-    out = io.BytesIO()
-    with wave.open(out, "wb") as w:
-        w.setnchannels(channels)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(pcm)
-    return out.getvalue()
+    channels = int(meta.get("channels") or 1)
+    rate = int(meta.get("samplerate") or 46875)
+    body = _riff(b"fmt ", struct.pack("<HHIIHH", 1, channels, rate, rate * channels * 2, channels * 2, 16))
+    body += _riff(b"smpl", smpl_chunk(meta))
+    bpm = meta.get("sound.bpm") or 0
+    if bpm:
+        body += _riff(b"acid", bytes(20) + struct.pack("<f", float(bpm)))
+    payload = tnge_json(meta)
+    # Null-terminated first, then padded to four: a length already divisible by four still
+    # gains a whole four bytes, which is how the device's own files come out.
+    payload += b"\0" * (4 - len(payload) % 4)
+    body += _riff(b"LIST", b"INFO" + b"TNGE" + struct.pack("<I", len(payload)) + payload)
+    body += _riff(b"data", pcm)
+    return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
 
 
 def base_audio(path) -> dict[int, tuple[str, bytes]]:
