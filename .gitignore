@@ -30,3 +30,6 @@ __pycache__/
 # Local release artifacts.
 dist/
 .mcp.json
+
+# Local API credentials (Freesound etc.); never committed.
+.env
