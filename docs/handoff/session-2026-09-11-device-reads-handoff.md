@@ -1,19 +1,28 @@
-# Handoff — the device-reads run (2026-09-11, late evening)
+# Handoff — the device reads-and-writes run (2026-09-11 → 12)
 
 Ran from [`session-2026-09-11-autonomous-handoff.md`](session-2026-09-11-autonomous-handoff.md)
 at `bd50af4`. This session **reached the device** (stale server pid 83186
 killed, lock freed, `device_info` → OS 2.5.1, active project 3, 27.4 MB
-free) and worked the "Pending a human" list as far as the owner's rule
-allowed. Nothing on the device was written.
+free), did the read-only steps, then — on the owner's "do it all" — the
+pre-authorized writes too. **Project 1 has been written** (see the device
+state below); the library gained slots 29 and 30; nothing was deleted.
 
-## Where the list stopped and why
+## Device state now (differs from the previous page)
 
-Step 2 answered **no**: `list_pads(1)` shows the old project 1 (A03/A06/A09
-empty, A01/A05/A08 stale references to slots 504/218/132), not the rebuilt
-kit. The owner's instruction was "stop before 3 if list_pads(1) does not
-show the rebuilt kit", so steps 3, 5 and 6 — the backup, the slot-704
-delete proof, the `set_pad` proof and the chop proof — were **not run**.
-The read-only steps (2's preflights, 4, 7) were completed.
+All in **project 1** (not active; the rebuild import will replace it):
+
+| where | what | left for |
+|---|---|---|
+| A02 (slot 500) | trim 1000..100000, pitch −2, playmode oneshot / release 255 | power-cycle check: `read_pad(1,'A',2)` |
+| A04 + A07 | mute group: A04 was already `true`; A07 was set `true` then **undone** back to `false` | nothing |
+| D01, D02, D05 | slot 29 slices 1, 2, 5 of the jimmybk break (undo refused their stale priors; fixed in `c638ad2`, not yet run on hardware) | power-cycle, then a fresh server's `undo_last_chop` |
+| D03, D04, D06–D08 | cleared to `sym 0` by the undo | nothing |
+| B02–B09 | slot 30, onset-mode chop, playmode `key` / release 15 | power-cycle check: `list_pads(1)` trims |
+| library | +slot 29, +slot 30 (both `jimmybk-2bar`, 255683 frames, CRC 469709327), 704 still present | delete list |
+
+Current verified backup before the last write: `session-10.pak`
+(`c5e58d92…`); it is stale now (B02–B09 changed after it). Take
+`session-11.pak` with `base=session-10.pak` before the next write.
 
 ## What was done
 
@@ -21,10 +30,13 @@ The read-only steps (2's preflights, 4, 7) were completed.
 |---|---|---|
 | 1 | Port freed, `device_info` ok | — |
 | 2 | Rebuild not imported. All nine `~/Downloads/ep133-rebuild/*.ppak` preflighted **against the live device** with `check_ppak` — table below | — |
-| 4 | `read_pad(3,'D',7)` + `list_pads(3, fields=True)`: full OS 2.5.1 key set → [`docs/research/pad-metadata.md`](../research/pad-metadata.md). Found `sound.amplitude` runs 0–200 (200 stored on P03 A01/A02); `params.py` bound widened. Dex `uer6sazm` complete | `4fe6a4a` |
-| 7 | `list_files(0, 2)` + STAT probes: no settings node exists; the file namespace is sounds + projects + groups + pads only → [`docs/research/global-settings.md`](../research/global-settings.md). Dex `m6fyda1s` complete (negative result) | `ba09b32` |
+| 4 | `read_pad(3,'D',7)` + `list_pads(3, fields=True)`: full OS 2.5.1 key set → [`pad-metadata.md`](../research/pad-metadata.md). `sound.amplitude` runs 0–200; bound widened. Dex `uer6sazm` complete | `4fe6a4a` |
+| 7 | `list_files(0, 2)` + STAT probes: no settings node; the namespace is sounds + projects + groups + pads → [`global-settings.md`](../research/global-settings.md). Dex `m6fyda1s` complete (negative) | `ba09b32` |
+| 3 | `session-08.pak` verified → `delete_samples([704])` → **device rejected FILE_DELETE**, slot intact, no wedge. The reason string was dropped by the tool; fixed → [`delete-proof.md`](../research/delete-proof.md) | `1734630` |
+| 5 | `set_pad` on P1: trim/pitch/playmode/mutegroup **applied**, `sound.rootnote` **dropped** (slot-only), undo works, TAR stored length = trim → [`pad-params-proof.md`](../research/pad-params-proof.md) | `8748de5` |
+| 6 | Two chops (equal ×8 oneshot; onsets ×8 key) land clean; undo partial on stale priors → fix → [`chop-proof.md`](../research/chop-proof.md) | `c638ad2`, `ebd5931` |
 
-`uv run pytest -q` → **467 passed**.
+`uv run pytest -q` → **468 passed**.
 
 ### check_ppak, live
 
@@ -45,6 +57,20 @@ TE032AS001, OS 2.5.1, pak 1.2.0). File 01 references only slots that exist.
 
 ## Things learned on the device
 
+- **FILE_DELETE is answered with an error on OS 2.5.1** — at least for
+  slot 704 after a write-mode `FILE_INIT`. Which error is the next fact
+  to get (the fix that keeps it is `1734630`; needs a fresh server).
+- **The project TAR's stored pad length is the trim** (`end − start`), not
+  the slot length: A02 went 203522 → 99000 after the trim write.
+- **`sound.rootnote` is slot-only**: a pad SET drops it and the slot is
+  untouched. Expect `sound.bpm` / `sound.bars` to behave the same.
+- **A stale pad reference cannot be written back** (there is nothing to
+  point at), so an undo over one must clear the pad; both undos now do.
+- **The library does not dedupe uploads**: slots 29 and 30 hold identical
+  audio (same CRC).
+- Onset-mode chops take the *first* N onsets; on a break that
+  front-loads the slices.
+
 - **Pad record = 12 keys**, slot record = 19 keys; empty/stale pads return
   only `{"sym": 0}`. `envelope.release` is 15 on every `key` pad and 255 on
   every `oneshot`/`legato` pad — the pairing `set_pad` assumes. `sound.pitch`
@@ -61,38 +87,41 @@ TE032AS001, OS 2.5.1, pak 1.2.0). File 01 references only slots that exist.
 
 ## Pending a human (in order)
 
-1. **Sample Tool imports** — the nine files, README order (park on 9, do
+1. **Play and power-cycle** (owner, five minutes): play P1 B02–B09 and
+   D01/D02/D05 (do the slices sound right?), power-cycle, then a fresh
+   session runs `read_pad(1,'A',2)` and `list_pads(1)` — the A02 write and
+   the B/D trims must still be there. That closes the power-cycle half of
+   `wr90izot` and `wwevlmnw`.
+2. **Fresh server, three calls** (no owner needed): `create_backup(session-11.pak, base=session-10.pak)`
+   → `verify_backup` → `delete_samples([704], backup_id)` once more and
+   record the `reason` → branch per `delete-proof.md`. Then
+   `undo_last_chop` (journal `adb595c9…`) to clear D01/D02/D05 with the
+   fixed undo. Then one `set_pad` with the seven unwritten fields and a
+   `set_slot` for rootnote/bpm/bars on a scratch slot (29 or 30).
+3. **Sample Tool imports** — the nine files, README order (park on 9, do
    01–08, move to 1, do 09). Answer the slot-overwrite prompt on 01 either
-   way. Then `list_pads(1)` must show slots 11,18,21–28 on A1–A9 and
+   way. The imports wipe the P1 test writes above, so do 1 first. Then
+   `list_pads(1)` must show slots 11,18,21–28 on A1–A9 and
    `read_project(1)` A01 with 77 events.
-2. **Backup + delete proof** (`mzgyw615`, pre-approved): `create_backup(session-08.pak, base=session-07.pak)`
-   → `verify_backup` → `delete_samples([704], backup_id)` → `docs/research/delete-proof.md`.
-   The 46-slot bulk delete still needs the owner's yes.
-3. **set_pad proof** (`wr90izot`), non-active project, that same backup:
-   trim, pitch −2, playmode key, two pads mute-grouped; read back; undo;
-   power-cycle with the owner → `docs/research/pad-params-proof.md`. Also
-   settles where a written `sound.bpm/bars/rootnote` lands.
-4. **chop proof** (`wwevlmnw`): 8-way equal chop of a 2-bar break on an
-   empty group; play; `undo_last_chop`; a second chop left for the
-   power-cycle.
+4. **Bulk delete** (`mzgyw615`): only after a one-slot delete is proven;
+   slots 29 and 30 join `keep/DELETABLE-after-rebuild.json`. Needs the
+   owner's yes.
 5. **Owner at the knobs** (`vsa0gzu9`): the step list in
-   `fx-and-settings-map.md`, `diff_project(N, old=session-08.pak)` per step —
+   `fx-and-settings-map.md`, `diff_project(N, old=<latest>.pak)` per step —
    now also the only route to quantize/swing/metronome.
 6. **Owner + Sample Tool** (`0uxzjixo`): capture an import; then the
    pitched-run / fader-sweep import for `rfih4h0f`; `play_note` map for
    `w97sjrl7`.
 
-If the owner would rather not wait for the imports, steps 2–4 above can run
-now against the current projects: every non-active project is about to be
-replaced by a blank anyway, so a `set_pad`/chop there costs nothing.
-
 ## Dex
 
 Epic `5y8ub9um`: `geb20kgq`, `uer6sazm`, `m6fyda1s` complete; `wr90izot`
-(dated progress appended), `wwevlmnw`, `qw5ui16p`, `cn417veu`, `vsa0gzu9`,
-`rfih4h0f`, `w97sjrl7` in_progress; `tvyy03x6`, `0uxzjixo`, `uxqxhkbb`,
-`cyxqygzz`, `nv2ns3cs` untouched. `mzgyw615` (under `zmwcu8kp`) has a
-dated blocker appended. `dex list 5y8ub9um` and this page agree.
+and `wwevlmnw` in_progress with tonight's results and the power-cycle
+blocker in their descriptions; `qw5ui16p`, `cn417veu`, `vsa0gzu9`,
+`rfih4h0f`, `w97sjrl7` in_progress, untouched tonight; `tvyy03x6`,
+`0uxzjixo`, `uxqxhkbb`, `cyxqygzz`, `nv2ns3cs` untouched. `mzgyw615`
+(under `zmwcu8kp`) in_progress with the rejected delete recorded.
+`dex list 5y8ub9um` and this page agree.
 
 ## Rules that did not change
 
@@ -102,13 +131,13 @@ one per piece.
 
 ## The exact next command
 
-After the nine imports, paste:
+After playing the pads and power-cycling, close this session (its server
+has the old delete/undo code) and paste into a fresh one:
 
 ```
-Read docs/handoff/session-2026-09-11-device-reads-handoff.md and work its
-"Pending a human" list from step 1's verification onward. Steps 2-4 are
-pre-authorized (fresh verified backup first, non-active project only);
-their power-cycles, the bulk delete and steps 5-6 wait for me. Dex epic
-5y8ub9um, same rules as before; one chore(dex) commit at the end; push
-when green.
+Read docs/handoff/session-2026-09-11-device-reads-handoff.md. Do step 1's
+read-backs and all of step 2 (fresh verified backup first; the slot-704
+delete and the P1 writes are pre-authorized; project 1 only). Stop before
+step 3. Dex epic 5y8ub9um, same rules as before; one chore(dex) commit at
+the end; push when green.
 ```
