@@ -1,0 +1,745 @@
+{
+ "source": "read_project(3) live, 2026-09-12, OS 2.5.1, after the velocity experiment",
+ "bpm": 123.08000183105469,
+ "kit": "extract_kit of youtube Blgk9KCLkKk 0-30 s (cache 9a6267822f49412d), installed on D1-D9 as slots 11,18,21,22,23,24,25,27,28",
+ "pads": {
+  "1": {
+   "stored_slot": 11,
+   "stored_length": 12516
+  },
+  "2": {
+   "stored_slot": 18,
+   "stored_length": 11972
+  },
+  "3": {
+   "stored_slot": 21,
+   "stored_length": 12515
+  },
+  "4": {
+   "stored_slot": 22,
+   "stored_length": 13061
+  },
+  "5": {
+   "stored_slot": 23,
+   "stored_length": 10885
+  },
+  "6": {
+   "stored_slot": 24,
+   "stored_length": 4355
+  },
+  "7": {
+   "stored_slot": 25,
+   "stored_length": 11429
+  },
+  "8": {
+   "stored_slot": 27,
+   "stored_length": 9253
+  },
+  "9": {
+   "stored_slot": 28,
+   "stored_length": 4900
+  }
+ },
+ "patterns": {
+  "d06": {
+   "bars": 1,
+   "events": [
+    {
+     "pad": 7,
+     "tick": 81,
+     "duration": 88,
+     "note": 60,
+     "byte4": 127,
+     "byte7": 31
+    },
+    {
+     "pad": 7,
+     "tick": 182,
+     "duration": 17,
+     "note": 60,
+     "byte4": 54,
+     "byte7": 31
+    },
+    {
+     "pad": 7,
+     "tick": 280,
+     "duration": 82,
+     "note": 60,
+     "byte4": 127,
+     "byte7": 31
+    },
+    {
+     "pad": 7,
+     "tick": 368,
+     "duration": 21,
+     "note": 60,
+     "byte4": 71,
+     "byte7": 8
+    }
+   ]
+  },
+  "d14": {
+   "bars": 4,
+   "events": [
+    {
+     "pad": 2,
+     "tick": 3,
+     "duration": 32,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 2,
+     "tick": 6,
+     "duration": 44,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 49,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 100,
+     "duration": 20,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 3,
+     "tick": 101,
+     "duration": 95,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 103,
+     "duration": 50,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 104,
+     "duration": 37,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 149,
+     "duration": 20,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 194,
+     "duration": 20,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 195,
+     "duration": 48,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 2,
+     "tick": 200,
+     "duration": 53,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 238,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 265,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 3,
+     "tick": 292,
+     "duration": 94,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 294,
+     "duration": 43,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 2,
+     "tick": 297,
+     "duration": 51,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 304,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 329,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 354,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 385,
+     "duration": 50,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 385,
+     "duration": 18,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 389,
+     "duration": 45,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 434,
+     "duration": 18,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 479,
+     "duration": 52,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 3,
+     "tick": 484,
+     "duration": 97,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 484,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 486,
+     "duration": 43,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 532,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 579,
+     "duration": 35,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 579,
+     "duration": 18,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 581,
+     "duration": 48,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 623,
+     "duration": 16,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 653,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 3,
+     "tick": 674,
+     "duration": 44,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 676,
+     "duration": 47,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 692,
+     "duration": 14,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 718,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 744,
+     "duration": 16,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 769,
+     "duration": 49,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 773,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 776,
+     "duration": 25,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 821,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 823,
+     "duration": 25,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 3,
+     "tick": 865,
+     "duration": 85,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 867,
+     "duration": 19,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 869,
+     "duration": 46,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 871,
+     "duration": 24,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 911,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 920,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 960,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 966,
+     "duration": 44,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 966,
+     "duration": 20,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1006,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1007,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1032,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 1059,
+     "duration": 45,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 3,
+     "tick": 1062,
+     "duration": 92,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1073,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1076,
+     "duration": 15,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1097,
+     "duration": 19,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1102,
+     "duration": 14,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1145,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 1154,
+     "duration": 45,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 1194,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1247,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 1252,
+     "duration": 47,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 3,
+     "tick": 1254,
+     "duration": 96,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1297,
+     "duration": 20,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1343,
+     "duration": 21,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 1352,
+     "duration": 46,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 1388,
+     "duration": 16,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 1,
+     "tick": 1417,
+     "duration": 18,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 3,
+     "tick": 1443,
+     "duration": 98,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 31
+    },
+    {
+     "pad": 2,
+     "tick": 1449,
+     "duration": 41,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 1454,
+     "duration": 17,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 1482,
+     "duration": 18,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    },
+    {
+     "pad": 1,
+     "tick": 1535,
+     "duration": 19,
+     "note": 60,
+     "byte4": 100,
+     "byte7": 8
+    }
+   ]
+  },
+  "d22": {
+   "bars": 1,
+   "events": [
+    {
+     "pad": 8,
+     "tick": 78,
+     "duration": 91,
+     "note": 60,
+     "byte4": 127,
+     "byte7": 31
+    },
+    {
+     "pad": 8,
+     "tick": 192,
+     "duration": 22,
+     "note": 60,
+     "byte4": 71,
+     "byte7": 31
+    },
+    {
+     "pad": 8,
+     "tick": 289,
+     "duration": 72,
+     "note": 60,
+     "byte4": 127,
+     "byte7": 31
+    },
+    {
+     "pad": 8,
+     "tick": 377,
+     "duration": 20,
+     "note": 60,
+     "byte4": 54,
+     "byte7": 8
+    }
+   ]
+  }
+ },
+ "notes": {
+  "d14": "owner's hand-played groove over the reference, 'about 90% there' - the ground truth for 54u38l9h and qfsgupwm",
+  "d06": "velocity experiment: pad index 7, soft/hard/soft/hard on beats 1-4, played ~15 ticks early",
+  "d22": "velocity experiment: pad index 8, same"
+ }
+}
