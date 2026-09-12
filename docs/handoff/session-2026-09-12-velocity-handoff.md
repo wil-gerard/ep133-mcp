@@ -90,13 +90,24 @@ Inputs: clip and stems cached at
 `kit/groove.json` from the 09-11 run). `analyze_reference` is cached there
 too, so no demucs run is needed. BPM 122.95, downbeat 0.44 s.
 
+## Blanked projects errored (2026-09-12 evening)
+
+Every project the owner blanked with `tools/blank_project.py` (all but P3)
+errored on the device when selected: the blank zeroed every scene chunk
+while the trailer's selected scene stayed 1, and no project the device ever
+wrote has chunk 1 zeroed (a fresh project holds `01 01 01 01` in all 99).
+Fixed in `d0c04eb`; `ep133-backups/blanks-v2/` holds the corrected blanks.
+**P1, P2, P4, P5 re-imported with `import_ppak` — first hardware use, each
+read back byte-equal.** P6–P9 still need it; see
+[`fast-device-writes.md`](fast-device-writes.md) for how to run the rest
+without an approval per call.
+
 ## Step 3 — the hardware session
 
 1. Fresh verified backup (one per session, `create_backup` with
    `base=session-24.pak` or Sample Tool). Switch the device off P03.
-2. `import_ppak` proof on an empty non-active project first (blank `.ppak`
-   from `tools/blank_project.py`), `read_project` back, backup diff. This
-   removes Sample Tool from the loop. Not yet run on hardware.
+2. ~~`import_ppak` proof~~ — done 2026-09-12 evening on P1/P2/P4/P5 (above).
+   Power-cycle persistence still unchecked.
 3. `install_kit` D10–D12 (the 09-11 run timed out on pad 10 mid-upload;
    `install_kit` still has no progress reporting — consider a per-pad call
    shape or at least a retry before a 12-pad install).
