@@ -25,12 +25,14 @@ the only bar the device's 384-tick pattern holds.
 
 Bars = clip length / bar length, rounded to 1, 2 or 4 on a log scale unless
 given. Onsets past the last bar, or before the downbeat, fold modulo the
-pattern, and a cell is kept only when at least half of the folds covering it
-fire there, so the pattern is the loop and not the union of every fill (a
-30 s clip folded to 4 bars has 4 folds; 254 hits became 77 that way, the
-owner's own count); an onset
-within MIN_INTERVAL_STEPS of the previous accepted onset is the same hit
-(a 16th grid cannot hold two, and separation double-triggers land there).
+pattern, where the clip bars covering a cell vote on it (CONSENSUS): each
+bar votes with the power of the class's loudest hit in it, so a bar where
+the class is silent abstains, a bar of faint intro ticks barely counts, and
+a fill in one bar of four is dropped while the loop is kept (a 30 s clip
+folded to 4 bars: 254 hits became 68, against the owner's 77). Onsets
+within MIN_INTERVAL_STEPS of each other are the same hit, placed where the
+loudest of them fell (a 16th grid cannot hold two, and separation
+double-triggers land there).
 The quantization error is the mean and maximum |onset - grid| in ms over
 the accepted onsets. Everything here is probable and the result says so.
 
@@ -67,6 +69,7 @@ ONSET_FLOOR = {"kick": 0.25, "snare": 0.15, "hat": 0.25}
 ONSET_WAIT = {"kick": 3, "snare": 3, "hat": 3}
 LOW_DOMINANCE = 0.10          # a mid-band onset with less than this share of the low band is the kick
 HIGH_DOMINANCE = 0.15         # ... and with less than this share of the high band it is the hat
+CONSENSUS = 0.5               # share of the covering bars' vote (power of their loudest hit) that keeps a cell
 LEAD_IN_S = 0.05              # silence prepended so a hit at t=0 has a rise to detect
 # The device stores velocity per event (1..127; a pressure recording gave 127 hard, 54..71 soft).
 # Strength is 0..1 relative to the loudest onset of the class, so the loudest hit of each class
@@ -137,11 +140,6 @@ def load_kit(clip: str | Path, kit: str | Path | None) -> dict:
         raise InvalidReference("Kit has no kick, snare or hat pad", observed=[s["class"] for s in slices],
                                next_step="Re-run extract_kit with kick, snare or hat in want.")
     return record
-
-
-def folds_covering(bar: int, bars: int, clip_bars: float) -> int:
-    """How many times the clip passes over bar `bar` of a `bars`-bar pattern; at least once."""
-    return max(1, math.ceil((clip_bars - bar) / bars))
 
 
 def choose_bars(clip_bars: float) -> int:
@@ -335,14 +333,13 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     # was given; "bands" produces one stream per class, where a kick and a hat at the same
     # instant are two real hits and only a repeat within the same class is a retrigger.
     scopes = {cls: cls for cls in pad_of} if detector == "bands" else {cls: "" for cls in pad_of}
-    last_step: dict[str, float] = {}
     placements = sorted(((t, cls, strength) for cls in pad_of for t, strength in detected.get(cls, ())),
                         key=lambda item: item[0])
-    # A clip longer than the pattern folds onto it. The union of every fold would keep each fill
-    # and variation from every bar of the clip; the pattern keeps a cell only when at least
-    # half of the folds that cover it fire there (the loop, not the fills), at the median tick
-    # offset and strength of those hits.
-    cells: dict[tuple[str, int], list[tuple[float, float]]] = {}
+    # Onsets within MIN_INTERVAL_STEPS of each other in one scope are one hit, and the loudest of
+    # them is where it is: a faint pre-echo a third of a step before a backbeat must not be the
+    # onset that stands for it.
+    merged: list[tuple[float, float, str, float]] = []      # (steps, error, cls, strength)
+    last: dict[str, int] = {}                                # scope -> index into merged
     for t, cls, strength in placements:
         # min_strength thins the transcription; the hits that stay keep their level below.
         if strength < min_strength:
@@ -350,25 +347,49 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
             continue
         steps, error = grid.step(t)
         scope = scopes[cls]
-        if scope in last_step and steps - last_step[scope] < MIN_INTERVAL_STEPS:
+        if scope in last and steps - merged[last[scope]][0] < MIN_INTERVAL_STEPS:
             dropped += 1
+            if strength > merged[last[scope]][3]:
+                merged[last[scope]] = (steps, error, cls, strength)
             continue
-        last_step[scope] = steps
+        last[scope] = len(merged)
+        merged.append((steps, error, cls, strength))
+    # A clip longer than the pattern folds onto it. The union of every fold would keep each fill
+    # and variation from every bar of the clip; the pattern keeps a cell only when the folds that
+    # cover it mostly fire there (the loop, not the fills), at the median tick offset and
+    # strength of those hits.
+    cells: dict[tuple[str, int], list[tuple[float, float, int]]] = {}
+    loudest: dict[str, dict[int, float]] = {cls: {} for cls in pad_of}   # per class, per clip bar
+    for steps, error, cls, strength in merged:
         nearest = round(steps)
         if nearest < 0:
             before += 1
         if not 0 <= nearest < total_steps:
             folded += 1
-        cells.setdefault((cls, nearest % total_steps), []).append((steps - nearest, strength))
         errors.append(abs(error) * 1000)
+        bar = nearest // STEPS_PER_BAR
+        cells.setdefault((cls, nearest % total_steps), []).append((steps - nearest, strength, bar))
+        loudest[cls][bar] = max(loudest[cls].get(bar, 0.0), strength)
     minority = 0
     kept: list[tuple[int, str, float, float]] = []
+    # The clip's extent in steps: a clip bar covers a cell only if that cell's step lies inside
+    # the clip, so the beat before the downbeat and the tail past the last full bar vote only
+    # on the cells they actually hold.
+    first_step, last_step = grid.step(0.0)[0], grid.step(float(analysis["duration_s"]))[0]
+    clip_bar_range = range(math.floor(first_step / STEPS_PER_BAR), math.ceil(last_step / STEPS_PER_BAR))
     for (cls, cell), found in cells.items():
-        if len(found) * 2 < folds_covering(cell // STEPS_PER_BAR, bars, clip_bars):
+        # Each covering clip bar votes with the power of the class's loudest hit in it: a bar of
+        # faint intro ticks cannot outvote a backbeat, a bar where the class is silent does not
+        # vote, and within a bar a soft offbeat hat counts as much as the accented one.
+        covering = sum(loudest[cls].get(bar, 0.0) ** 2 for bar in clip_bar_range
+                       if bar % bars == cell // STEPS_PER_BAR
+                       and first_step <= bar * STEPS_PER_BAR + cell % STEPS_PER_BAR < last_step)
+        votes = sum(loudest[cls][bar] ** 2 for bar in {bar for _, _, bar in found})
+        if votes < CONSENSUS * covering - 1e-9:
             minority += 1
             continue
-        offsets = sorted(offset for offset, _ in found)
-        levels = sorted(level for _, level in found)
+        offsets = sorted(offset for offset, _, _ in found)
+        levels = sorted(level for _, level, _ in found)
         kept.append((cell, cls, offsets[len(offsets) // 2], levels[len(levels) // 2]))
     # "bands" scales strength to each band's own peak, "classify" to the whole stem's; velocity
     # is relative to the loudest cell of the class either way.

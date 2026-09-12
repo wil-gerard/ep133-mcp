@@ -65,5 +65,7 @@ def test_bands_transcription_of_the_reference(d14):
     assert {p['pad']: p['role'] for p in record['pads']} == {1: 'hat', 2: 'kick', 3: 'snare'}
     assert record['quantization']['folds'] == 4
     score = score_pattern(record['tick_pattern'], d14)
-    assert score['pads']['2']['recall'] >= 0.65 and score['pads']['2']['precision'] == 1.0
-    assert score['recall'] >= 0.7 and all(p['ratio'] <= 1.5 for p in score['pads'].values())
+    # Kick: all 16 downbeats, and only those (the owner's 23 include 7 flams a 16th grid cannot hold).
+    assert score['pads']['2']['matched'] == 16 and score['pads']['2']['precision'] == 1.0
+    assert score['pads']['3']['recall'] >= 0.85 and score['pads']['1']['recall'] >= 0.75
+    assert score['recall'] >= 0.75 and all(p['ratio'] <= 1.5 for p in score['pads'].values())

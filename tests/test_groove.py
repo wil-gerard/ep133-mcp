@@ -93,7 +93,12 @@ def test_wrong_downbeat_is_a_rotation(fixture):
     shift = round(phase / (60 / guessed['bpm']) * groove.STEPS_PER_BEAT)
     assert shift % groove.STEPS_PER_BEAT == 0
     got = sounds_per_step(fixture, guessed)
-    assert got == expected_per_step(2)[shift:] + expected_per_step(2)[:shift]
+    rotated = expected_per_step(2)[shift:] + expected_per_step(2)[:shift]
+    # The beat before the guessed downbeat is heard once; the clip's silent tail is the other
+    # fold of those steps and votes against it, so they may be missing but never wrong.
+    steps = len(rotated) - shift
+    assert got[:steps] == rotated[:steps]
+    assert all(g <= e for g, e in zip(got[steps:], rotated[steps:]))
 
 
 def test_choose_bars():
