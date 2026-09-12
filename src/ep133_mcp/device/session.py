@@ -400,7 +400,7 @@ class DeviceSession:
         response = self.request(CMD_FILE, P.file_delete(slot))
         if not response.ok:
             raise DeviceRejected('device rejected the delete', slot=slot, status=response.status,
-                                 message=response.payload.rstrip(b'\0').decode('latin-1'))
+                                 reason=response.payload.rstrip(b'\0').decode('latin-1'))
         self.begin_read()
         return not self.slot_exists(slot)
 
