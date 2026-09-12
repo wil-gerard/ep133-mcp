@@ -99,7 +99,9 @@ def inspect_ppak(path: str | Path, project: int) -> dict:
     if summary:
         out["contents"] = {
             "bpm": summary["bpm"],
-            "pads_assigned": [{"group": p["group"], "pad": p["pad"], "slot": p["stored_slot"], "frames": p["stored_length"]}
+            # The stored length is the pad's trim (end - start), not the slot's frame count:
+            # docs/research/pad-params-proof.md.
+            "pads_assigned": [{"group": p["group"], "pad": p["pad"], "slot": p["stored_slot"], "trim_frames": p["stored_length"]}
                               for p in summary["pads"] if p["stored_slot"]],
             "patterns": [{"group": p["group"], "index": p["index"], "bars": p["bars"], "events": len(p["events"]),
                           "automation": len(p["automation"])} for p in summary["patterns"]],

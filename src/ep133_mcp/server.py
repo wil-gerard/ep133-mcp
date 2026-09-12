@@ -129,7 +129,7 @@ def device_info(include_serial: bool = False) -> dict[str, Any]:
     name="list_pads",
     description=(
         "Read all 48 pads in a project (1–9, default active). Returns resolved sym, "
-        "stored slot and length, and stale_reference for nonzero stored slots "
+        "stored slot and length (the trim, end - start, in frames), and stale_reference for nonzero stored slots "
         "absent from the library. With fields=true each pad also carries metadata: the whole "
         "JSON record the device holds for the pad node (playmode, trim, envelope, pitch, level, "
         "pan, mute group, time mode, MIDI channel - whatever this OS returns, unfiltered). "

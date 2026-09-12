@@ -52,7 +52,7 @@ def test_inspect_reads_a_good_export(tmp_path):
     assert out["problems"] == [] and out["entry"] == "/projects/P07.tar"
     assert out["referenced_slots"] == [16] and out["included_sounds"] == {16: {"name": "tone", "frames": 100, "channels": 1, "samplerate": 46875}}
     assert out["contents"]["bpm"] == 120.0
-    assert out["contents"]["pads_assigned"] == [{"group": "A", "pad": 7, "slot": 16, "frames": 37500}]
+    assert out["contents"]["pads_assigned"] == [{"group": "A", "pad": 7, "slot": 16, "trim_frames": 37500}]
     assert [p["index"] for p in out["contents"]["patterns"]] == [1, 3]
 
 
