@@ -106,6 +106,24 @@ One MIDI owner (the flock now proves it — that is what stopped this run).
 Every import into a non-active project. Never commit `*.pak`, `*.ppak`,
 clips, stems, slices, the serial. Conventional Commits, one per piece.
 
+## Token mindfulness
+
+This run spent most of its context reading whole files up front and
+re-reading Dex descriptions to re-edit them. The next session has the
+device and should spend its budget there:
+
+- Do not re-read the code you are not changing. `docs/design/tool-contracts.md`
+  and the per-tool docstrings say what each tool does; the source is only
+  needed when a read-back disagrees with the contract.
+- Device results are large (`list_pads(fields=True)` is 48 records,
+  `read_project` is every event). Ask for one pad / one pattern when one
+  will do, and write the full result to `docs/research/` with a script
+  rather than pasting it through the conversation.
+- `dex edit` replaces the whole description: append with `dex show --full |
+  sed` as this session did, once per task at the end, not after every step.
+- One `chore(dex)` commit at the end, not per task.
+- Pytest to a log file, read the tail (memory: piping to `head` hangs).
+
 ## The exact next command
 
 With the older session closed, paste:
@@ -117,4 +135,19 @@ plus the pre-approved backup and slot-704 delete); stop before 3 if
 list_pads(1) does not show the rebuilt kit on group A. Steps 5-6 write to
 a non-active project after a fresh verified backup and are pre-authorized;
 their power-cycles, the bulk delete, and steps 8-9 wait for me.
+
+Dex: epic 5y8ub9um. `dex start` each task as you reach it; `dex complete
+<id> --commit <sha> --result "..."` only when its "Done when" is met on the
+device; otherwise append a dated Progress / Blocker / Next step to the
+description and leave it in_progress. Create subtasks when work splits;
+delete nothing. Commit .dex once at the end as chore(dex).
+
+Git: Conventional Commits, one commit per proof or tool change, research
+notes in docs/research/, never *.pak, *.ppak, clips or the serial. Push
+main when the tree is clean and tests are green. End with a session
+handoff that agrees with `dex list 5y8ub9um`.
+
+Be token-mindful: read the contract and the handoff, not the whole tree;
+request one pad or one pattern where one will do; write large device
+output to files; edit Dex once per task.
 ```
