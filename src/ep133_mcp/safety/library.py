@@ -16,7 +16,7 @@ def sound_index(sounds):
     for entry, data in sounds.items():
         match = SOUND_NAME.fullmatch(entry)
         if not match or not 1 <= int(match[1]) <= 999 or int(match[1]) in indexed:
-            raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Invalid or duplicate sound slot', observed=entry)
+            raise InvalidDestination('Invalid or duplicate sound slot', next_step='Check the source backup and requested destination.', observed=entry)
         indexed[int(match[1])] = (entry, match[2], data)
     return indexed
 
@@ -34,7 +34,7 @@ def list_samples(device=None, source=None):
     if source:
         _, projects, sounds = read_pak(Path(source).expanduser().read_bytes())
         if sorted(projects) != list(range(1, 10)):
-            raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Usage requires a full nine-project backup')
+            raise InvalidDestination('Usage requires a full nine-project backup', next_step='Check the source backup and requested destination.')
         indexed = sound_index(sounds)
         metadata = {}
         for slot, (_, name, data) in indexed.items():
@@ -42,7 +42,7 @@ def list_samples(device=None, source=None):
                 frames, channels, rate = wav.getnframes(), wav.getnchannels(), wav.getframerate()
                 pcm = wav.readframes(frames)
                 if len(pcm) != frames * channels * wav.getsampwidth():
-                    raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Truncated WAV', observed=slot)
+                    raise InvalidDestination('Truncated WAV', next_step='Check the source backup and requested destination.', observed=slot)
                 metadata[slot] = {'name': name, 'frames': frames, 'channels': channels,
                                   'samplerate': rate, 'pcm_bytes': len(pcm)}
     else:
@@ -55,7 +55,7 @@ def list_samples(device=None, source=None):
             if device.slot_exists(slot):
                 meta = device.metadata(slot)
                 if not meta or '_unparsed' in meta:
-                    raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Sample metadata unavailable', observed=slot)
+                    raise InvalidDestination('Sample metadata unavailable', next_step='Check the source backup and requested destination.', observed=slot)
                 metadata[slot] = meta
     usage = references(projects)
     entries = [{'slot': slot, **meta, 'references': usage.get(slot, []),
@@ -69,19 +69,19 @@ def list_samples(device=None, source=None):
 def export_project(source, project, out, include_samples=True):
     """Export a project from a backup; WAV containers and project bytes stay intact."""
     if type(project) is not int or not 1 <= project <= 9:
-        raise InvalidDestination(next_step='Check the source backup and requested destination.', 'project must be 1..9')
+        raise InvalidDestination('project must be 1..9', next_step='Check the source backup and requested destination.')
     out = Path(out).expanduser()
     if out.suffix != '.ppak':
-        raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Output must end in .ppak')
+        raise InvalidDestination('Output must end in .ppak', next_step='Check the source backup and requested destination.')
     meta, projects, sounds = read_pak(Path(source).expanduser().read_bytes())
     if project not in projects:
-        raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Project absent from source', observed=project)
+        raise InvalidDestination('Project absent from source', next_step='Check the source backup and requested destination.', observed=project)
     tar = projects[project]
     slots = sorted(references({project: tar}))
     indexed = sound_index(sounds)
     missing = [s for s in slots if s not in indexed]
     if include_samples and missing:
-        raise InvalidDestination(next_step='Check the source backup and requested destination.', 'Referenced samples absent from backup', observed=missing)
+        raise InvalidDestination('Referenced samples absent from backup', next_step='Check the source backup and requested destination.', observed=missing)
     selected = {indexed[s][0]: indexed[s][2] for s in slots} if include_samples else {}
     data = build_ppak(project, tar, project_meta(meta), selected)
     with out.open('xb') as stream:
