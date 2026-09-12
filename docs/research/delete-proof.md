@@ -113,3 +113,21 @@ next command after the delete (the re-read) was answered normally. The
 
 Lesson: an upstream table row marked ❌ is an inference, not a capture.
 Check krate's captures before concluding a command is unusable.
+
+## Bulk delete, first tranche (2026-09-12, owner's yes)
+
+`keep/DELETABLE-after-rebuild.json` lists 47 slots nothing references
+*once the rebuild is imported*. Against `session-14.pak` (current), 43 of
+them are still stored by the pre-rebuild projects (P2 alone holds 1, 3, 7,
+10, 455, 456, 505–507, 701–707), which `delete_samples` refuses by
+design. The four unreferenced now — **12, 15, 476, 704** — were deleted in
+one call, journal `16d00312…`, every entry `deleted`: library 57 → 53,
+free bytes 26 921 268 → 30 313 536 (+3 392 268). `verify_backup(session-14)`
+→ `stale`, only `library_slots only_in_backup [12, 15, 476, 704]`.
+`session-15.pak` (`4ebbdc72…`, base session-14, 53 reused) diff vs
+session-14: removed [12, 15, 476, 704], **0 pad records differing**.
+
+The list file now carries `deleted` (12, 15, 476, 704; 30 was deleted
+earlier) and 43 pending — deletable after the imports, with the owner's
+yes standing but a fresh backup and a re-run of the reference check
+required, since the imports change which slots are stored.

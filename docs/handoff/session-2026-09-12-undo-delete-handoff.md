@@ -15,15 +15,17 @@ From [`session-2026-09-12-undo-journal-handoff.md`](session-2026-09-12-undo-jour
 | 4b | Owner asked "are we sure?" — no: ep133-krate's `sniffer-delete-hi.bin` shows Sample Tool's delete is **`06 <id>`**, no `02` byte, no FILE_INIT. Ours put the id at the wrong offset. Fixed, pinned to the capture | `6acbc4b` |
 | 4c | `delete_samples([30])` → **`deleted`**: 58 → 57 slots, +511 500 bytes free, slot re-read absent, `session-14.pak` (`7220aa30…`, base session-13) diff vs session-13 shows only the removal → `mzgyw615` complete (positive) → [`delete-proof.md`](../research/delete-proof.md) | `0b60d62` |
 
+| 4d | Owner's yes on the bulk list: 43 of 47 still stored by the pre-rebuild projects (refused by design until the imports); the four unreferenced now — **12, 15, 476, 704** — deleted, 57 → 53 slots, +3 392 268 bytes, session-14 → session-15 diff: removal only, 0 pad records differing | — |
+
 `uv run pytest -q` → **474 passed**.
 
 ## Device state
 
-OS 2.5.1, 26 921 268 bytes free, **57 slots** (30 deleted; 29 present and
-referenced only by the hand-assigned P1 B01; 704 intact). P1: A02
-amplitude 150; B01 holds slot 29 untrimmed; B02–B09, D01/D02/D05 empty
-with stale lengths. Nothing else written. Last verified backup:
-`session-14.pak`.
+OS 2.5.1, 30 313 536 bytes free, **53 slots** (30, 12, 15, 476, 704
+deleted; 29 present and referenced only by the hand-assigned P1 B01). P1:
+A02 amplitude 150; B01 holds slot 29 untrimmed; B02–B09, D01/D02/D05
+empty with stale lengths. Nothing else written. Last verified backup:
+`session-15.pak` (`4ebbdc72…`).
 
 ## Next (in order)
 
@@ -33,11 +35,14 @@ with stale lengths. Nothing else written. Last verified backup:
    with them. Afterwards `list_pads(1)` must show slots 11,18,21–28 on
    A1–A9 and `read_project(1)` A01 with 77 events; take `session-14.pak`
    (base session-13).
-2. **Bulk delete** (`mzgyw615` done-when met): the 46 parked slots in
-   `keep/DELETABLE-after-rebuild.json`, plus 29 once B01 is cleared, via
-   `delete_samples` — after the imports (they may re-reference slots), with
-   a fresh verified backup, and only on the owner's yes. Read every entry;
-   diff the backups afterwards.
+2. **Bulk delete, rest** (owner's yes given 2026-09-12): the 43 slots
+   left in `keep/DELETABLE-after-rebuild.json` (`delete` key), plus 29 once
+   B01 is cleared, via `delete_samples` — only after the imports, since
+   the old projects still store them. Fresh verified backup first, re-run
+   the reference check offline against it (the imports change what is
+   stored), delete in tranches, read every entry, diff the backups. Note
+   the previous handoff's flag: 1, 2, 5, 8, 13, 457, 500, 505 are factory
+   sounds only unreferenced because the rebuild empties the old projects.
 3. Owner's next power-cycle: `list_pads(1)` should show the eleven leftover
    lengths zeroed — confirms the note in `chop-proof.md`.
 4. `vsa0gzu9`, `0uxzjixo`, `rfih4h0f`, `w97sjrl7` as in the previous
