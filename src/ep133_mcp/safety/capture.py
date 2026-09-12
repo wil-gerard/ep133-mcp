@@ -8,9 +8,9 @@ metadata stores, so every slot here is verified against that crc before it goes 
 The device streams roughly 25 KiB/s, so a full library is tens of minutes. A backup is therefore
 incremental: a slot whose crc already appears in `base` is copied from it rather than re-read,
 which makes every backup after the first cost only the audio that changed. The crc is the device's
-own and is checked on both sides, so copying is not a guess.
+own and is checked on both sides, so copying is not a guess. Reused PCM is wrapped with fresh metadata so sound edits are retained.
 
-What this cannot do is prove the file restores. Restoring is still Sample Tool's, and the handoff
+What this cannot do is prove the file restores. Full restore uses Sample Tool, and the handoff
 records that a restore once failed to revert a pad. This writes the backup; it does not change the
 rule that only a post-restore backup diff proves a restore worked.
 """

@@ -785,7 +785,7 @@ def check_ppak(path: str, project: int, slot_map: dict[str, int] | None = None) 
         "current backup_id and returns needs_confirmation with the file's bpm/pads/patterns/scenes "
         "and what project N holds now; show that to the owner and repeat with confirm. The project "
         "is read back afterwards and compared byte-for-byte, then field-by-field if the bytes "
-        "differ. undo_last_import writes the verified backup's copy of the project back. "
+        "differ. undo_last_import restores the exact saved project preimage. "
         "Power-cycle persistence is a separate check."
     ),
 )
@@ -804,7 +804,7 @@ def import_ppak(path: str, project: int, backup_id: str, confirm: str | None = N
 @server.tool(
     name="undo_last_import",
     description=(
-        "Write back the project as the verified backup held it before the newest import_ppak "
+        "Restore the exact project preimage saved before the newest import_ppak "
         "that still stands, then read it back and compare. Calling again reaches the next older "
         "import."
     ),

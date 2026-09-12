@@ -13,8 +13,9 @@ whether the file is a single-project export in the device's own flavour, whether
 project, whether that project is the active one (never import into it), which library slots its
 pads reference and whether each one exists on the device or is carried inside the file, and what
 the project currently holds that the import would replace. import_ppak runs it first and refuses
-on any problem, then writes, reads the project back and compares. The undo is the verified
-backup: undo_last_import writes that backup's copy of the project back.
+on any problem, then writes, reads the project back and compares. Undo restores an exact private preimage while checking backup integrity and refusing
+subsequent edits. Included samples are uploaded or reused before the project write;
+explicit slot mapping rewrites only the imported project's references.
 """
 
 from __future__ import annotations
@@ -154,6 +155,8 @@ def check_ppak(path: str | Path, project: int, device, slot_map=None) -> dict:
             _, _, sounds = read_pak(Path(path).expanduser().read_bytes())
             plan = plan_sounds(sounds, device, slot_map)
             report["sound_plan"] = [{k: v for k, v in e.items() if k != "pcm"} for e in plan]
+            report["required_pcm_bytes"] = sum(len(e["pcm"]) for e in plan if e["action"] == "upload")
+            report["free_bytes"] = device.sample_root().free_space_in_bytes
             # Remapping must not change a reference to a different, non-included sound.
             untouched = set(report["referenced_slots"]) - set(report["included_sounds"])
             if any(e["slot"] in untouched for e in plan):
@@ -255,6 +258,11 @@ class Importer:
                 stream.flush()
                 os.fsync(stream.fileno())
             prior_path.chmod(0o600)
+            fd = os.open(cache, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
         entry = {"kind": "project", "project": project, "node": 2000 + 1000 * project, "path": report["path"],
                  "tar_bytes": len(tar), "tar_sha256": impact["tar_sha256"], "backup_path": backup_path,
                  "prior_sha256": hashlib.sha256(prior).hexdigest(), "prior_path": str(prior_path),
@@ -334,7 +342,13 @@ class Importer:
         if device.active_project() == entry["project"]:
             raise InvalidDestination("Cannot undo into the active project", next_step="Select a different project first.")
         current = device.project_tar(entry["project"])
-        if hashlib.sha256(current).hexdigest() != entry.get("read_back_sha256", entry["tar_sha256"]):
+        current_hash = hashlib.sha256(current).hexdigest()
+        if entry["status"] in ("failed", "undo_attempted", "undo_failed") and current_hash == entry["prior_sha256"]:
+            entry["status"] = record["status"] = "undone"
+            entry.pop("failure", None)
+            self.journal.save(record)
+            return self._result(record)
+        if current_hash != entry.get("read_back_sha256", entry["tar_sha256"]):
             raise VerificationFailed("Project changed since import; undo refused", next_step="Inspect current state and use an explicit selective restore.")
         raw = backup.read_bytes()
         if hashlib.sha256(raw).hexdigest() != record["backup_id"]:

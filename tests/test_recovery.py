@@ -109,3 +109,45 @@ def test_truncated_audio_mapping_and_capacity_refused(tmp_path):
     d.free = 200
     with pytest.raises(InvalidDestination):
         plan_sounds(sounds, d)
+
+
+def test_superset_backup_undo_restores_exact_preimage(tmp_path):
+    d, b, j = setup(tmp_path)
+    write_backup_pak(d, tmp_path / 'session.pak')
+    files = unpack_project(d.tars[7])
+    files['settings'] = files['settings'][:-1] + b'\x02'
+    d.tars[7] = pack_project(files)
+    exact = d.tars[7]
+    importer = Importer(b, j)
+    approve(importer, d, blank_ppak(tmp_path), 7)
+    assert importer.undo(d)['status'] == 'undone'
+    assert d.tars[7] == exact
+
+
+def test_confirmation_rebinds_changed_audio_and_project(tmp_path):
+    d, b, j = setup(tmp_path)
+    importer = Importer(b, j)
+    path = ppak(tmp_path, files=minimal_project(pad7_slot=40), sounds={'/sounds/040 tone.wav': wav()})
+    first = importer.import_ppak(path, 7, 'backup', d)
+    ppak(tmp_path, files=minimal_project(pad7_slot=40), sounds={'/sounds/040 tone.wav': wav(99)})
+    second = importer.import_ppak(path, 7, 'backup', d, first['confirm'])
+    assert second['status'] == 'needs_confirmation' and not d.writes
+    d.tars[7] = pack_project(minimal_project(pad7_slot=0))
+    third = importer.import_ppak(path, 7, 'backup', d, second['confirm'])
+    assert third['status'] == 'needs_confirmation' and not d.writes
+
+
+def test_active_target_and_changed_backup_block_undo(tmp_path):
+    d, b, j = setup(tmp_path)
+    path = tmp_path / 'session.pak'
+    write_backup_pak(d, path)
+    importer = Importer(b, j)
+    approve(importer, d, blank_ppak(tmp_path), 7)
+    d.active = 7
+    with pytest.raises(InvalidDestination):
+        importer.undo(d)
+    d.active = 3
+    path.write_bytes(path.read_bytes() + b'changed')
+    with pytest.raises(VerificationFailed):
+        importer.undo(d)
+    assert len(d.written) == 1

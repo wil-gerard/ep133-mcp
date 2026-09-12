@@ -132,8 +132,8 @@ class Playback:
                 self._report.update(status='failed', error=type(e).__name__, message=str(e))
 
     def stop(self):
-        self._cancel.set()
         with self._mutex:
+            self._cancel.set()
             thread = self._thread
         if thread is not None:
             thread.join(timeout=2)
