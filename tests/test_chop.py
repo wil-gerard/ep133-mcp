@@ -173,6 +173,18 @@ def test_undo_restores_every_pad_and_leaves_the_slot(setup):
     assert chopper.undo(d)["status"] == "undone"
 
 
+def test_undo_clears_pads_whose_prior_slot_is_gone(setup):
+    d, chopper, wav = setup
+    d.pads[2, "B", 10] = (549, 0)                     # stale reference: stored slot absent, resolves empty
+    chopper.chop(wav, 2, "B", [10, 11], {"mode": "equal"}, "backup", d)
+    out = chopper.undo(d)
+    assert out["status"] == "undone"
+    assert "prior slot 549 is absent" in out["entries"][1]["undo_note"]
+    assert d.pads[2, "B", 10] == (0, 0) and d.pads[2, "B", 11] == (0, 0)
+    assert [w for w in d.writes if w[0] == "set"][-2:] == [("set", d.node(2, "B", 11), {"sym": 0}),
+                                                           ("set", d.node(2, "B", 10), {"sym": 0})]
+
+
 def test_undo_skips_pads_that_changed_since(setup):
     d, chopper, wav = setup
     chopper.chop(wav, 2, "B", [10, 11], {"mode": "equal"}, "backup", d)

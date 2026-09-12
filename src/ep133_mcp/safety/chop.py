@@ -259,16 +259,19 @@ class Chopper:
                 continue
             device.begin_read()
             if entry["prior_slot"] != 0 and not device.slot_exists(entry["prior_slot"]):
-                entry["undo_failure"] = "Prior stored slot is absent; restoring stale records is unverified."
-                self.journal.save(record)
-                continue
+                # A stored slot the library no longer has resolves to an empty pad, and the stale
+                # number cannot be written back (observed 2026-09-11, docs/research/chop-proof.md),
+                # so the pad is cleared instead and the record says so.
+                entry["undo_note"] = (f"prior slot {entry['prior_slot']} is absent from the library; "
+                                      "pad cleared instead of re-pointed at it")
+                prior = (0, 0)
             entry["status"] = "undo_attempted"
             self.journal.save(record)
             try:
                 before = entry.get("before_record", {})
                 restore = {k: before[k] for k in ("sample.start", "sample.end", "sound.playmode", "envelope.release")
                            if k in before}
-                device.set_metadata(entry["node"], {"sym": entry["prior_slot"]} | restore)
+                device.set_metadata(entry["node"], {"sym": prior[0]} | restore)
                 actual = pad_record(device, project, group, pad)
                 if actual != prior:
                     raise VerificationFailed("Undo did not reproduce prior stored slot/length", observed=actual,

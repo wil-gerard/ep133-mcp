@@ -229,8 +229,11 @@ every entry's status in the result. One journal (`chop_sample`).
 Reverse order over the chop's pads: a pad whose stored slot is still the
 chop's gets `{sym: prior_slot}` plus whatever trim/playmode the record held
 before, then its stored record must equal the prior one. A pad that changed
-since, or whose prior slot no longer exists, is left alone and reported.
-The uploaded slot stays in the library.
+since is left alone and reported. A pad whose prior slot no longer exists in
+the library (a stale reference, which resolves to an empty pad) is cleared to
+`sym 0` rather than re-pointed at the missing slot, with `undo_note` saying
+so; `undo_last_install` follows the same rule. The uploaded slot stays in
+the library.
 
 ### `undo_last_pad_change()`
 Writes the `before` values of the latest `set_pad`/`set_slot` journal back

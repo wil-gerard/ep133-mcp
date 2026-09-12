@@ -159,11 +159,15 @@ def test_changed_pad_is_not_overwritten_by_undo(setup):
     assert d.writes == before
 
 
-def test_stale_prior_reference_is_not_falsely_reported_restored(setup):
+def test_stale_prior_reference_is_cleared_not_rewritten(setup):
     d, installer, mapping = setup
-    d.pads[1, 'A', 1] = (30, 0)
+    d.pads[1, 'A', 1] = (30, 0)                       # points at a slot the library does not have
     installer.install(mapping, 1, 'A', 'backup', d)
-    assert installer.undo(d)['status'] == 'undo_partial'
+    out = installer.undo(d)
+    assert out['status'] == 'undone'
+    entry = next(e for e in out['entries'] if e['pad'] == 1)
+    assert entry['status'] == 'undone' and 'prior slot 30 is absent' in entry['undo_note']
+    assert d.pads[1, 'A', 1] == (0, 0)                # cleared, never re-pointed at 30
 
 
 def test_journal_failure_prevents_writes(setup, monkeypatch):

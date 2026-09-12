@@ -154,13 +154,14 @@ class Installer:
                 continue
             device.begin_read()
             if entry['prior_slot'] != 0 and not device.slot_exists(entry['prior_slot']):
-                entry['undo_failure'] = 'Prior stored slot is absent; restoring stale records is unverified.'
-                self.journal.save(record)
-                continue
+                # Same rule as the chop undo: a stale prior is an empty pad, so clear it.
+                entry['undo_note'] = (f"prior slot {entry['prior_slot']} is absent from the library; "
+                                      'pad cleared instead of re-pointed at it')
+                prior = (0, 0)
             entry['status'] = 'undo_attempted'
             self.journal.save(record)
             try:
-                device.assign_pad(entry['node'], entry['prior_slot'])
+                device.assign_pad(entry['node'], prior[0])
                 actual = pad_record(device, entry['project'], entry['group'], entry['pad'])
                 if actual != prior:
                     raise VerificationFailed('Undo did not reproduce prior stored slot/length', observed=actual,
