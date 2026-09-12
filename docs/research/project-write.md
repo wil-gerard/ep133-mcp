@@ -45,16 +45,17 @@ builds it; `DeviceSession.write_project` sends it with the sample upload's
 
 Also in the bundle: `setActiveProject(path)` is
 `setMetadata(/projects, {active: nodeId})` — a live metadata write on
-node 2000, not a boot-time setting as upstream assumed. Not wired here yet.
+node 2000, not a boot-time setting as upstream assumed. Now exposed through confirmed `set_active_project`; hardware acceptance remains pending.
 
 ## Tool
 
 `import_ppak(path, project, backup_id, confirm)` runs `check_ppak`, refuses
-on any problem or on a file carrying sounds, confirms with the file's
+on any problem, plans carried samples with explicit slot remapping and confirms with the file's
 contents and what the project holds now, journals (`import_ppak`), writes,
 reads the project back: byte-equal → `imported`; decoded-equal →
 `imported_with_differences`; otherwise `VerificationFailed`.
-`undo_last_import` writes the verified backup's copy of the project back.
+`undo_last_import` restores an exact private project preimage and refuses subsequent
+project edits. See [portable recovery](portable-recovery.md) for the expanded path.
 
 ## Hardware
 
