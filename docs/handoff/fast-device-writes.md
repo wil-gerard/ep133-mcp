@@ -77,6 +77,7 @@ in-process is that approval, not a bypass. Confirm tokens expire after
 
 Projects 1, 2, 4, 5 re-imported over MCP (`blanks-v2/`, scenes-only
 change, each read back byte-equal — `import_ppak` is proven on hardware).
-6, 7, 8, 9 still hold the zero-scene blank and error when selected; run
-section 3 for them, or import `blanks-v2/blank-P0{6,7,8,9}.ppak` with
-Sample Tool.
+6, 7, 8, 9 then ran as one process (section 3, owner's allow-list in
+place): all four imported, read back byte-equal, ~2.5 min each — nearly all
+of it `verify_backup`. All eight blanked projects are fixed; owner confirmed
+P5 opens on the device.

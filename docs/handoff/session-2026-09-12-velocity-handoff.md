@@ -97,8 +97,8 @@ errored on the device when selected: the blank zeroed every scene chunk
 while the trailer's selected scene stayed 1, and no project the device ever
 wrote has chunk 1 zeroed (a fresh project holds `01 01 01 01` in all 99).
 Fixed in `d0c04eb`; `ep133-backups/blanks-v2/` holds the corrected blanks.
-**P1, P2, P4, P5 re-imported with `import_ppak` — first hardware use, each
-read back byte-equal.** P6–P9 still need it; see
+**All eight re-imported with `import_ppak` — first hardware use, each read
+back byte-equal** (P1/2/4/5 over MCP, P6–9 batched in one process); see
 [`fast-device-writes.md`](fast-device-writes.md) for how to run the rest
 without an approval per call.
 
@@ -106,7 +106,7 @@ without an approval per call.
 
 1. Fresh verified backup (one per session, `create_backup` with
    `base=session-24.pak` or Sample Tool). Switch the device off P03.
-2. ~~`import_ppak` proof~~ — done 2026-09-12 evening on P1/P2/P4/P5 (above).
+2. ~~`import_ppak` proof~~ — done 2026-09-12 evening on all eight blanks (above).
    Power-cycle persistence still unchecked.
 3. `install_kit` D10–D12 (the 09-11 run timed out on pad 10 mid-upload;
    `install_kit` still has no progress reporting — consider a per-pad call
