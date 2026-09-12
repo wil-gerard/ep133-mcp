@@ -69,6 +69,14 @@ def test_read_mode_file_init_matches_capture():
     assert P.file_init(P.READ_MODE) == bytes.fromhex("010000400000")
 
 
+def test_file_delete_matches_sample_tool_capture():
+    # ep133-krate captures/sniffer-delete-hi.bin, frame 5: Sample Tool deleting slot 467 sends
+    # packed 04 06 01 53 -> payload 06 01 D3: opcode, u16 BE id, no area byte.
+    assert unpack(bytes.fromhex("04060153")) == bytes.fromhex("0601d3")
+    assert P.file_delete(467) == bytes.fromhex("0601d3")
+    assert P.file_delete(30) == bytes.fromhex("06001e")
+
+
 def test_metadata_get_matches_capture():
     root = next(f for f in FRAMES if f["label"].startswith("preflight/sample_root"))
     assert unpack(bytes.fromhex(root["sent_hex"])[9:-1]) == P.metadata_get(P.SAMPLE_ROOT, 0)

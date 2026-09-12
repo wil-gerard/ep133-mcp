@@ -443,10 +443,11 @@ class DeviceSession:
     def delete_slot(self, slot: int) -> bool:
         """Delete one library slot and report whether it is gone afterwards.
 
-        FILE_DELETE is documented upstream and UNVERIFIED here, so the return value comes from
-        re-reading the slot rather than from the command's own status: a device that ignores the
-        command answers ok and changes nothing."""
-        self.begin_write()
+        Sent the way Sample Tool sends it (GREET, then FILE_DELETE with no FILE_INIT - see
+        payloads.file_delete). The return value still comes from re-reading the slot rather than
+        from the command's own status: a device that ignores the command answers ok and changes
+        nothing."""
+        self.greet()
         response = self.request(CMD_FILE, P.file_delete(slot))
         if not response.ok:
             raise DeviceRejected('device rejected the delete', slot=slot, status=response.status,

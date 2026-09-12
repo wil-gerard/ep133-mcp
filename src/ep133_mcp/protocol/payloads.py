@@ -35,15 +35,16 @@ def file_init(mode: int, max_response: int = DEFAULT_MAX_RESPONSE) -> bytes:
 
 
 def file_delete(file_id: int) -> bytes:
-    """`06 02 <file_id u16 BE>`. REJECTED on OS 2.5.1.
+    """`06 <file_id u16 BE>` - what Sample Tool sends.
 
-    Upstream's PROTOCOL.md documents this as FILE_DELETE and marks it destructive. Sent after a
-    write-mode FILE_INIT it is answered with status 1 "failed to delete" for a Sample Tool slot
-    (704) and an MCP-uploaded, unreferenced slot (30) alike (docs/research/delete-proof.md,
-    2026-09-11/12); no delete has ever succeeded here, so every caller must treat a success
-    status as unproven until a backup diff confirms one."""
+    ep133-krate's `captures/sniffer-delete-hi.bin` (Sample Tool deleting slot 467 on OS 2.0.5)
+    carries exactly `06 01 D3` straight after GREET, no FILE_INIT, answered status 0 and
+    followed by the device's own free-space notifications as the audio is released. Upstream
+    PROTOCOL.md's `06 02 <fid>` was never verified there and is rejected here: with the extra
+    byte the device reads the id from the wrong offset (704 became 514, 30 became 512) and
+    answers "failed to delete" (docs/research/delete-proof.md)."""
     _check_u16(file_id, "file_id")
-    return struct.pack(">BBH", FILE_DELETE, 0x02, file_id)
+    return struct.pack(">BH", FILE_DELETE, file_id)
 
 
 def metadata_get(file_id: int, page: int = 0) -> bytes:
