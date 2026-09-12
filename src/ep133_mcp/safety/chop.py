@@ -24,7 +24,7 @@ from ..device import DeviceError
 from ..protocol.payloads import PAD_LABELS
 from .backup import snapshot
 from .errors import InvalidDestination, VerificationFailed
-from .install import device_id, pad_record
+from .install import device_id, pad_record, verify_prior
 from .params import PAIRED_RELEASE, PLAYMODES, compare
 from .preflight import RATE, prepare, read_sample, validate_destination
 
@@ -280,9 +280,7 @@ class Chopper:
             project, group, pad = entry["project"], entry["group"], entry["pad"]
             prior = (entry["prior_slot"], entry["prior_length"])
             current = pad_record(device, project, group, pad)
-            if entry["status"] == "undo_attempted" and current == prior:
-                entry["status"] = "undone"
-                self.journal.save(record)
+            if entry["status"] == "undo_attempted" and self._settle(device, entry, prior, record):
                 continue
             if current[0] != entry["slot"]:
                 entry["undo_failure"] = "Pad changed since the chop; no overwrite attempted."
@@ -303,10 +301,9 @@ class Chopper:
                 restore = {k: before[k] for k in ("sample.start", "sample.end", "sound.playmode", "envelope.release")
                            if k in before}
                 device.set_metadata(entry["node"], {"sym": prior[0]} | restore)
-                actual = pad_record(device, project, group, pad)
-                if actual != prior:
-                    raise VerificationFailed("Undo did not reproduce prior stored slot/length", observed=actual,
-                                             expected=prior, next_step="Inspect the pad and journal.")
+                note = verify_prior(device, project, group, pad, prior)
+                if note:
+                    entry["undo_note"] = '; '.join(filter(None, (entry.get("undo_note"), note)))
                 entry["status"] = "undone"
                 entry.pop("undo_failure", None)
                 self.journal.save(record)
@@ -320,3 +317,16 @@ class Chopper:
         result = self._result(record)
         result["library_slot_left_in_place"] = record["entries"][0]["slot"] if record["entries"][0]["status"] != "pending" else None
         return result
+
+    def _settle(self, device, entry, prior, record):
+        """An interrupted undo whose write did land: mark it undone without writing again."""
+        try:
+            note = verify_prior(device, entry["project"], entry["group"], entry["pad"], prior)
+        except VerificationFailed:
+            return False
+        if note:
+            entry["undo_note"] = note
+        entry["status"] = "undone"
+        entry.pop("undo_failure", None)
+        self.journal.save(record)
+        return True

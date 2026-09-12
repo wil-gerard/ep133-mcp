@@ -29,6 +29,26 @@ def pad_record(device, project, group, pad):
     raise VerificationFailed('Stored pad record missing', next_step='Reconnect and inspect the project.')
 
 
+def verify_prior(device, project, group, pad, prior):
+    """Prove an undo write reproduced `prior`; returns a note, or None when the record matches.
+
+    A cleared pad (prior slot 0) is proven by stored slot 0 and a pad JSON that resolves to
+    sym 0: when the clearing write lands in a later power session than the assignment, the
+    device keeps the old length in the project record (P1 B09 read (0, 175813) after sym 0
+    with JSON {sym: 0}, 2026-09-12; before a power-cycle the same write read (0, 0)). The
+    length field is independent of the slot field (docs/research/backup-verification.md), so
+    that leftover is reported, not treated as a failed undo."""
+    actual = pad_record(device, project, group, pad)
+    if actual == prior:
+        return None
+    if prior[0] == 0 and actual[0] == 0:
+        device.begin_read()
+        if int(device.pad_metadata(project, group, pad).get('sym') or 0) == 0:
+            return f'pad cleared (JSON sym 0); the device left stored length {actual[1]} in the project record'
+    raise VerificationFailed('Undo did not reproduce prior stored slot/length', observed=actual,
+                             expected=prior, next_step='Inspect the pad and journal.')
+
+
 class Installer:
     def __init__(self, backups, journal):
         self.backups = backups
@@ -144,9 +164,7 @@ class Installer:
                 continue
             current = pad_record(device, entry['project'], entry['group'], entry['pad'])
             prior = (entry['prior_slot'], entry['prior_length'])
-            if entry['status'] == 'undo_attempted' and current == prior:
-                entry['status'] = 'undone'
-                self.journal.save(record)
+            if entry['status'] == 'undo_attempted' and self._settle(device, entry, prior, record):
                 continue
             if current != (entry['slot'], entry['frames']):
                 entry['undo_failure'] = 'Pad changed since install; no overwrite attempted.'
@@ -162,10 +180,9 @@ class Installer:
             self.journal.save(record)
             try:
                 device.assign_pad(entry['node'], prior[0])
-                actual = pad_record(device, entry['project'], entry['group'], entry['pad'])
-                if actual != prior:
-                    raise VerificationFailed('Undo did not reproduce prior stored slot/length', observed=actual,
-                                             expected=prior, next_step='Inspect the pad and journal.')
+                note = verify_prior(device, entry['project'], entry['group'], entry['pad'], prior)
+                if note:
+                    entry['undo_note'] = '; '.join(filter(None, (entry.get('undo_note'), note)))
                 entry['status'] = 'undone'
                 entry.pop('undo_failure', None)
                 self.journal.save(record)
@@ -179,3 +196,16 @@ class Installer:
         result = self._result(record)
         result['library_slots_left_in_place'] = [e['slot'] for e in record['entries'] if e['status'] != 'pending']
         return result
+
+    def _settle(self, device, entry, prior, record):
+        """An interrupted undo whose write did land: mark it undone without writing again."""
+        try:
+            note = verify_prior(device, entry['project'], entry['group'], entry['pad'], prior)
+        except VerificationFailed:
+            return False
+        if note:
+            entry['undo_note'] = note
+        entry['status'] = 'undone'
+        entry.pop('undo_failure', None)
+        self.journal.save(record)
+        return True

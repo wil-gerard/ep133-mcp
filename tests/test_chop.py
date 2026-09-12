@@ -10,6 +10,7 @@ import pytest
 from ep133_mcp.device import DeviceError
 from ep133_mcp.safety.chop import Chopper, plan_slices
 from ep133_mcp.safety.errors import InvalidDestination
+from ep133_mcp.safety.install import device_id
 from ep133_mcp.safety.journal import Journal
 from test_install import FakeDevice
 from test_preflight import wav_file
@@ -91,6 +92,9 @@ class ChopDevice(FakeDevice):
 
     def node(self, project, group, pad):
         return 2000 + 1000 * project + 200 + 100 * "ABCD".index(group) + pad
+
+    def pad_metadata(self, project, group, pad):
+        return self.read_pad(project, group, pad)["pad_metadata"]
 
     def read_pad(self, project, group, pad):
         node = self.node(project, group, pad)
@@ -234,3 +238,33 @@ def test_undo_reaches_the_older_journal_once_the_newest_is_undone(setup):
     assert second["journal_id"] == older["journal_id"] and second["status"] == "undone"
     assert d.pads[2, "D", 1] == (0, 0)
     assert chopper.undo(d)["journal_id"] == first["journal_id"]
+
+
+def test_undo_accepts_a_cleared_pad_whose_length_the_device_kept(setup):
+    d, chopper, wav = setup
+    d.pads[2, "B", 10] = (549, 0)                     # stale prior: cleared, not re-pointed
+    chopper.chop(wav, 2, "B", [10, 11], {"mode": "equal"}, "backup", d)
+    d.keep_length_on_clear = True                     # as observed after a power-cycle (P1 B09)
+    out = chopper.undo(d)
+    assert out["status"] == "undone"
+    assert d.pads[2, "B", 10] == (0, 1000) and d.pads[2, "B", 11] == (0, 1000)
+    assert out["entries"][2]["undo_note"] == "pad cleared (JSON sym 0); the device left stored length 1000 in the project record"
+    assert out["entries"][1]["undo_note"].startswith("prior slot 549 is absent")
+    assert out["entries"][1]["undo_note"].endswith("left stored length 1000 in the project record")
+
+
+def test_undo_settles_an_interrupted_clear_on_the_next_call(setup):
+    d, chopper, wav = setup
+    chopper.chop(wav, 2, "B", [10, 11], {"mode": "equal"}, "backup", d)
+    d.keep_length_on_clear = True
+    d.records[d.node(2, "B", 11)]["sym"] = 0            # the clear landed, then the readback failed
+    d.pads[2, "B", 11] = (0, 1000)
+    identity = device_id({"sku": d.greet().sku, "serial": d.greet().serial})
+    record = chopper.journal.latest(identity, operation="chop_sample")
+    record["entries"][2]["status"] = "undo_attempted"
+    chopper.journal.save(record)
+    out = chopper.undo(d)
+    assert out["status"] == "undone"
+    assert [e["status"] for e in out["entries"][1:]] == ["undone", "undone"]
+    assert "left stored length 1000" in out["entries"][2]["undo_note"]
+    assert [w for w in d.writes if w[0] == "set"][-1] == ("set", d.node(2, "B", 10), {"sym": 0})

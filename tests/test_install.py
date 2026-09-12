@@ -24,6 +24,7 @@ class FakeDevice:
         self.bad_crc = False
         self.fail_upload = None
         self.fail_assignment = False
+        self.keep_length_on_clear = False
         self.free = 100000
 
     def greet(self):
@@ -65,12 +66,17 @@ class FakeDevice:
             return {}
         return self.samples[slot] | ({'crc': -1} if self.bad_crc else {})
 
+    def pad_metadata(self, project, group, pad):
+        return {'sym': self.pads[project, group, pad][0]}
+
     def assign_pad(self, node, slot):
         self.writes.append(('assign', node, slot))
         project = (node - 2000) // 1000
         rest = node - 2000 - project * 1000 - 200
         group, pad = 'ABCD'[rest // 100], rest % 100
-        self.pads[project, group, pad] = (slot, self.samples[slot]['sample.end'] if slot else 0)
+        length = self.samples[slot]['sample.end'] if slot else (
+            self.pads[project, group, pad][1] if self.keep_length_on_clear else 0)
+        self.pads[project, group, pad] = (slot, length)
         if self.fail_assignment:
             raise DeviceError('assignment ACK lost')
 
@@ -168,6 +174,18 @@ def test_stale_prior_reference_is_cleared_not_rewritten(setup):
     entry = next(e for e in out['entries'] if e['pad'] == 1)
     assert entry['status'] == 'undone' and 'prior slot 30 is absent' in entry['undo_note']
     assert d.pads[1, 'A', 1] == (0, 0)                # cleared, never re-pointed at 30
+
+
+def test_undo_accepts_a_cleared_pad_whose_length_the_device_kept(setup):
+    d, installer, mapping = setup
+    installer.install(mapping, 1, 'A', 'backup', d)
+    d.keep_length_on_clear = True                     # as observed after a power-cycle (P1 B09)
+    out = installer.undo(d)
+    assert out['status'] == 'undone'
+    assert all(e['status'] == 'undone' for e in out['entries'])
+    assert d.pads[1, 'A', 1][0] == 0 and d.pads[1, 'A', 1][1] > 0
+    assert out['entries'][0]['undo_note'] == (
+        f"pad cleared (JSON sym 0); the device left stored length {d.pads[1, 'A', 1][1]} in the project record")
 
 
 def test_journal_failure_prevents_writes(setup, monkeypatch):
