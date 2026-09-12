@@ -13,16 +13,20 @@ All in **project 1** (not active; the rebuild import will replace it):
 
 | where | what | left for |
 |---|---|---|
-| A02 (slot 500) | trim 1000..100000, pitch −2, playmode oneshot / release 255 | power-cycle check: `read_pad(1,'A',2)` |
+| A02 (slot 500) | trim 1000..100000, pitch −2, playmode oneshot / release 255 | **power-cycle verified** |
+| B02 (slot 30) | attack 20, amplitude 75, pan −8, time.mode bar, midi.channel 5 (bpm/bars dropped) | power-cycle check: `read_pad(1,'B',2)` |
+| slot 29 | renamed `jimmybk 2bar`, rootnote 48, bpm 88, bars 2 via `set_slot` | power-cycle check (same `read_pad`, slot 29 is on D01) |
 | A04 + A07 | mute group: A04 was already `true`; A07 was set `true` then **undone** back to `false` | nothing |
-| D01, D02, D05 | slot 29 slices 1, 2, 5 of the jimmybk break (undo refused their stale priors; fixed in `c638ad2`, not yet run on hardware) | power-cycle, then a fresh server's `undo_last_chop` |
+| D01, D02, D05 | slot 29 slices 1, 2, 5 of the jimmybk break (undo refused their stale priors; fixed in `c638ad2`, not yet run on hardware) | **power-cycle verified**; a fresh server's `undo_last_chop` clears them |
 | D03, D04, D06–D08 | cleared to `sym 0` by the undo | nothing |
-| B02–B09 | slot 30, onset-mode chop, playmode `key` / release 15 | power-cycle check: `list_pads(1)` trims |
+| B02–B09 | slot 30, onset-mode chop, playmode `key` / release 15 | **power-cycle verified** (eight distinct trims) |
 | library | +slot 29, +slot 30 (both `jimmybk-2bar`, 255683 frames, CRC 469709327), 704 still present | delete list |
 
-Current verified backup before the last write: `session-10.pak`
-(`c5e58d92…`); it is stale now (B02–B09 changed after it). Take
-`session-11.pak` with `base=session-10.pak` before the next write.
+Latest backup: `session-11.pak` (`6a06942a…`), taken after the power-cycle
+and before writes 3–4; those changed only JSON metadata (no stored
+slot/length), so `verify_backup` still reports it `current`. Take
+`session-12.pak` with `base=session-11.pak` before anything that moves a
+stored record.
 
 ## What was done
 
@@ -35,6 +39,8 @@ Current verified backup before the last write: `session-10.pak`
 | 3 | `session-08.pak` verified → `delete_samples([704])` → **device rejected FILE_DELETE**, slot intact, no wedge. The reason string was dropped by the tool; fixed → [`delete-proof.md`](../research/delete-proof.md) | `1734630` |
 | 5 | `set_pad` on P1: trim/pitch/playmode/mutegroup **applied**, `sound.rootnote` **dropped** (slot-only), undo works, TAR stored length = trim → [`pad-params-proof.md`](../research/pad-params-proof.md) | `8748de5` |
 | 6 | Two chops (equal ×8 oneshot; onsets ×8 key) land clean; undo partial on stale priors → fix → [`chop-proof.md`](../research/chop-proof.md) | `c638ad2`, `ebd5931` |
+| owner | **Power-cycle**: A02 write, both chops all persisted; stale pad lengths zeroed on boot | — |
+| 5b | The remaining seven `set_pad` fields on B02 (five applied, bpm/bars dropped) and `set_slot(29)` (all applied); `set_pad` now refuses the three slot-only keys | `0ecb04d`, `8d1c9dc` |
 
 `uv run pytest -q` → **468 passed**.
 
@@ -62,8 +68,13 @@ TE032AS001, OS 2.5.1, pak 1.2.0). File 01 references only slots that exist.
   to get (the fix that keeps it is `1734630`; needs a fresh server).
 - **The project TAR's stored pad length is the trim** (`end − start`), not
   the slot length: A02 went 203522 → 99000 after the trim write.
-- **`sound.rootnote` is slot-only**: a pad SET drops it and the slot is
-  untouched. Expect `sound.bpm` / `sound.bars` to behave the same.
+- **`sound.rootnote`, `sound.bpm`, `sound.bars` are slot-only**: a pad SET
+  drops them and the slot is untouched; `set_slot` applies them. The pad
+  record takes 11 of upstream's 14 fields.
+- **The device computes `sound.bpm` for an upload** (87.93 on slot 29
+  before anyone wrote it).
+- **Stale pad records are rewritten on boot**: stored lengths on A01/A05/A08
+  went from nonzero to 0 across the power-cycle.
 - **A stale pad reference cannot be written back** (there is nothing to
   point at), so an undo over one must clear the pad; both undos now do.
 - **The library does not dedupe uploads**: slots 29 and 30 hold identical
@@ -87,17 +98,15 @@ TE032AS001, OS 2.5.1, pak 1.2.0). File 01 references only slots that exist.
 
 ## Pending a human (in order)
 
-1. **Play and power-cycle** (owner, five minutes): play P1 B02–B09 and
-   D01/D02/D05 (do the slices sound right?), power-cycle, then a fresh
-   session runs `read_pad(1,'A',2)` and `list_pads(1)` — the A02 write and
-   the B/D trims must still be there. That closes the power-cycle half of
-   `wr90izot` and `wwevlmnw`.
-2. **Fresh server, three calls** (no owner needed): `create_backup(session-11.pak, base=session-10.pak)`
-   → `verify_backup` → `delete_samples([704], backup_id)` once more and
-   record the `reason` → branch per `delete-proof.md`. Then
-   `undo_last_chop` (journal `adb595c9…`) to clear D01/D02/D05 with the
-   fixed undo. Then one `set_pad` with the seven unwritten fields and a
-   `set_slot` for rootnote/bpm/bars on a scratch slot (29 or 30).
+1. **Owner**: do B02–B09 and D01/D02/D05 sound right? Then one more
+   power-cycle (for B02's five fields and slot 29's four).
+2. **Fresh server, four calls** (no owner needed): `read_pad(1,'B',2)`
+   (B02 + slot 30) and `read_pad(1,'D',1)` (slot 29) → if identical,
+   `dex complete wr90izot`. `verify_backup(session-11.pak)` →
+   `delete_samples([704], backup_id)` once more, record the `reason` →
+   branch per `delete-proof.md`. `undo_last_chop` (journal `adb595c9…`) →
+   D01/D02/D05 cleared → with the owner's "sounds right", `dex complete
+   wwevlmnw`. One `set_pad` with `sound.amplitude: 150` to see 0..200 land.
 3. **Sample Tool imports** — the nine files, README order (park on 9, do
    01–08, move to 1, do 09). Answer the slot-overwrite prompt on 01 either
    way. The imports wipe the P1 test writes above, so do 1 first. Then
@@ -131,13 +140,13 @@ one per piece.
 
 ## The exact next command
 
-After playing the pads and power-cycling, close this session (its server
-has the old delete/undo code) and paste into a fresh one:
+After the second power-cycle, close this session (its server has the old
+delete/undo/amplitude code) and paste into a fresh one:
 
 ```
-Read docs/handoff/session-2026-09-11-device-reads-handoff.md. Do step 1's
-read-backs and all of step 2 (fresh verified backup first; the slot-704
-delete and the P1 writes are pre-authorized; project 1 only). Stop before
-step 3. Dex epic 5y8ub9um, same rules as before; one chore(dex) commit at
-the end; push when green.
+Read docs/handoff/session-2026-09-11-device-reads-handoff.md and do all
+of "Pending a human" step 2 (verified backup first; the slot-704 delete,
+the undo and the P1 write are pre-authorized; project 1 only). The
+slices sound right: <yes/no>. Stop before step 3. Dex epic 5y8ub9um, same
+rules as before; one chore(dex) commit at the end; push when green.
 ```
