@@ -84,7 +84,7 @@ SOUND_FIELDS = {
     "envelope.attack": _int(0, 255),
     "envelope.release": _int(0, 255),
     "sound.pitch": _number(-12.0, 12.0),
-    "sound.amplitude": _int(0, 100),
+    "sound.amplitude": _int(0, 200),        # 200 observed on P03 A01/A02 (docs/research/pad-metadata.md)
     "sound.pan": _int(-16, 16),
     "time.mode": _enum(TIME_MODES),
     "sound.bpm": _number(1.0, 200.0),       # 240 is rejected upstream; bars clamp to powers of two

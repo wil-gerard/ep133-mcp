@@ -287,7 +287,7 @@ def undo_last_install() -> dict[str, Any]:
         "list_pads numbering) through the same metadata write that assigns a pad. params is any "
         "subset of: sample.start, sample.end (trim, in frames of the slot's sample), "
         "sound.playmode ('oneshot'|'key'|'legato' - strings, ints are rejected), envelope.attack, "
-        "envelope.release (0..255), sound.pitch (semitones -12..12), sound.amplitude (0..100), "
+        "envelope.release (0..255), sound.pitch (semitones -12..12), sound.amplitude (0..200, 100 = unity), "
         "sound.pan (-16..16), sound.mutegroup (bool), time.mode ('off'|'bar'|'bpm'), sound.bpm "
         "(1..200), sound.bars, sound.rootnote (0..127), midi.channel (0..15). Only the fields given "
         "are sent (the device merges); sound.playmode is paired with envelope.release (oneshot 255, "

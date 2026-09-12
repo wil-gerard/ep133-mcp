@@ -88,8 +88,9 @@ def test_validate_params_rules():
         {"sound.playmode": "oneshot", "envelope.release": 40}
     assert validate_params({"sound.playmode": "legato"}, PAD_FIELDS, "x") == {"sound.playmode": "legato"}
     assert validate_params({"sound.pitch": 3}, PAD_FIELDS, "x") == {"sound.pitch": 3.0}
+    assert validate_params({"sound.amplitude": 200}, PAD_FIELDS, "x") == {"sound.amplitude": 200}
     for bad in ({}, None, {"sym": 5}, {"sound.playmode": 1}, {"sound.playmode": "loop"}, {"envelope.attack": 256},
-                {"sound.pitch": 13}, {"sound.pitch": True}, {"sound.pan": -17}, {"sound.mutegroup": 1},
+                {"sound.pitch": 13}, {"sound.pitch": True}, {"sound.pan": -17}, {"sound.amplitude": 201}, {"sound.mutegroup": 1},
                 {"midi.channel": 16}, {"sample.start": 100, "sample.end": 100}, {"sample.end": 0},
                 {"sound.bpm": 240}, {"time.mode": "BPM"}):
         with pytest.raises(InvalidDestination):
