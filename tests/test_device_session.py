@@ -117,3 +117,65 @@ def test_send_note_sends_on_then_off_on_the_port():
     d._out = None
     with pytest.raises(DeviceUnavailable):
         d.send_note(1, 60)
+
+
+def _entry(node, flags, size, name):
+    return node.to_bytes(2, 'big') + bytes([flags]) + size.to_bytes(4, 'big') + name.encode() + b'\0'
+
+
+def test_list_directory_pages_until_empty():
+    d = DeviceSession()
+    pages = [Response(0, 0, 5, 0, b'\0\0' + _entry(1000, 0, 0, 'sounds') + _entry(2000, 0, 0, 'projects')),
+             Response(0, 0, 5, 0, b'\0\1' + _entry(5000, 1, 224, 'settings')),
+             Response(0, 0, 5, 0, b'\0\2')]
+    d.request = Mock(side_effect=pages)
+    out = d.list_directory(0)
+    assert [(e['node'], e['kind'], e['size'], e['name']) for e in out] == [
+        (1000, 'folder', 0, 'sounds'), (2000, 'folder', 0, 'projects'), (5000, 'file', 224, 'settings')]
+    sent = [call.args[1] for call in d.request.call_args_list]
+    assert sent == [bytes.fromhex('0400000000'), bytes.fromhex('0400010000'), bytes.fromhex('0400020000')]
+    d.request = Mock(return_value=Response(0, 0, 5, 1, b'invalid id\0'))
+    with pytest.raises(DeviceRejected):
+        d.list_directory(7)
+    d.request = Mock(return_value=Response(0, 0, 5, 0, b'\0\5' + _entry(1, 1, 1, 'x')))
+    with pytest.raises(DeviceRejected):                    # page index mismatch
+        d.list_directory(0)
+
+
+def test_walk_descends_folders_and_skips():
+    d = DeviceSession()
+    tree = {0: [_entry(1000, 0, 0, 'sounds'), _entry(2000, 0, 0, 'projects'), _entry(9, 1, 10, 'top')],
+            1000: [_entry(1, 1, 5, '001.pcm')],
+            2000: [_entry(3000, 0, 0, 'P01')],
+            3000: [_entry(3100, 0, 0, 'groups')],
+            3100: []}
+
+    def request(command, payload):
+        node = int.from_bytes(payload[3:5], 'big')
+        page = int.from_bytes(payload[1:3], 'big')
+        body = b''.join(tree[node]) if page == 0 else b''
+        return Response(0, 0, 5, 0, page.to_bytes(2, 'big') + body)
+    d.request = Mock(side_effect=request)
+    out = d.walk(0, max_depth=3, skip={1000})
+    assert [e['path'] for e in out] == ['/sounds', '/projects', '/top', '/projects/P01', '/projects/P01/groups']
+    assert out[3]['parent'] == 2000 and out[3]['depth'] == 1
+    assert [e['path'] for e in d.walk(0, max_depth=1)] == ['/sounds', '/projects', '/top']
+    assert '/sounds/001.pcm' in [e['path'] for e in d.walk(0, max_depth=2)]
+    with pytest.raises(DeviceRejected):
+        d.walk(0, max_nodes=2)
+
+
+def test_stat_parses_and_reports_absence():
+    d = DeviceSession()
+    d.request = Mock(return_value=Response(0, 0, 5, 0, (5000).to_bytes(2, 'big') + (3000).to_bytes(2, 'big')
+                                           + b'\1' + (224).to_bytes(4, 'big') + b'settings\0'))
+    assert d.stat(5000) == {'node': 5000, 'parent': 3000, 'flags': 1, 'size': 224, 'name': 'settings', 'kind': 'file'}
+    assert d.request.call_args.args[1] == bytes.fromhex('0b1388')
+    d.request = Mock(return_value=Response(0, 0, 5, 1, b'invalid id\0'))
+    assert d.stat(1234) is None
+    d.request = Mock(return_value=Response(0, 0, 5, 1, b'not initialized\0'))
+    with pytest.raises(DeviceRejected):
+        d.stat(1234)
+    d.request = Mock(return_value=Response(0, 0, 5, 0, b'\1\2'))
+    with pytest.raises(DeviceRejected):
+        d.stat(1234)

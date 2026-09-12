@@ -61,6 +61,62 @@ def metadata_set(file_id: int, fields: dict) -> bytes:
     return struct.pack(">BBH", FILE_METADATA, FILE_METADATA_SET, file_id) + body + b"\0"
 
 
+FILE_LIST = 0x04
+FILE_INFO = 0x0B
+FLAG_FILE = 0x01     # phones24: entry.flags & 1 means file, else folder
+
+
+def file_list(node: int, page: int = 0) -> bytes:
+    """`04 <page u16 BE> <node u16 BE>`: one page of a directory node's children.
+
+    ep133-ppak documents page 0 of this as GROUP_DUMP (safe); phones24's ep133-export-to-daw walks
+    the whole filesystem with it from node 0, paging until an empty page. Neither is a read that
+    leaves a file open."""
+    _check_u16(node, "node")
+    _check_u16(page, "page")
+    return struct.pack(">BHH", FILE_LIST, page, node)
+
+
+def file_info(file_id: int) -> bytes:
+    """`0B <file_id u16 BE>`: STAT - node, parent, flags, size and name. Documented safe for any id."""
+    _check_u16(file_id, "file_id")
+    return struct.pack(">BH", FILE_INFO, file_id)
+
+
+def _c_string(data: bytes, offset: int) -> tuple[str, int]:
+    end = data.find(b"\0", offset)
+    if end < 0:
+        raise ValueError("unterminated name")
+    return data[offset:end].decode("utf-8", "replace"), end + 1
+
+
+def parse_file_list(payload: bytes, page: int) -> list[dict]:
+    """Entries of one FILE_LIST page: [{node, flags, size, name, kind}]. Empty list = past the end."""
+    if len(payload) < 2:
+        return []
+    if int.from_bytes(payload[:2], "big") != page:
+        raise ValueError("file list page index mismatch")
+    entries, offset = [], 2
+    while offset < len(payload):
+        if len(payload) - offset < 8:
+            raise ValueError("truncated file list entry")
+        node, flags, size = struct.unpack_from(">HBI", payload, offset)
+        name, offset = _c_string(payload, offset + 7)
+        entries.append({"node": node, "flags": flags, "size": size, "name": name,
+                        "kind": "file" if flags & FLAG_FILE else "folder"})
+    return entries
+
+
+def parse_file_info(payload: bytes) -> dict:
+    """STAT response: {node, parent, flags, size, name, kind}."""
+    if len(payload) < 10:
+        raise ValueError("file info response too short")
+    node, parent, flags, size = struct.unpack_from(">HHBI", payload, 0)
+    name, _ = _c_string(payload, 9)
+    return {"node": node, "parent": parent, "flags": flags, "size": size, "name": name,
+            "kind": "file" if flags & FLAG_FILE else "folder"}
+
+
 def pad_node(project: int, group: str, pad_num: int) -> int:
     """Metadata node id for a pad.
 

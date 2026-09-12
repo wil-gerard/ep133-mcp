@@ -228,6 +228,56 @@ class DeviceSession:
         except (UnicodeDecodeError, json.JSONDecodeError):
             return {"_unparsed": len(body)}
 
+    def stat(self, file_id: int) -> dict | None:
+        """STAT one id: its node, parent, flags, size and name, or None when the device says invalid.
+
+        Any other error status is raised, not swallowed: an unknown id is exactly where the
+        interface has surprised us before."""
+        r = self.request(CMD_FILE, P.file_info(file_id))
+        if not r.ok:
+            text = r.payload.rstrip(b"\0").decode("latin-1", "replace").lower()
+            if r.status == 1 and text in ("invalid file id", "invalid id"):
+                return None
+            raise DeviceRejected("stat rejected", file_id=file_id, status=r.status, reason=text)
+        try:
+            return P.parse_file_info(r.payload)
+        except ValueError as e:
+            raise DeviceRejected(str(e), file_id=file_id, payload=r.payload.hex()) from e
+
+    def list_directory(self, node: int, max_pages: int = 64) -> list[dict]:
+        """Every child of a directory node, paging FILE_LIST until an empty page."""
+        entries = []
+        for page in range(max_pages):
+            r = self.request(CMD_FILE, P.file_list(node, page))
+            if not r.ok:
+                raise DeviceRejected("file list rejected", node=node, page=page, status=r.status,
+                                     reason=r.payload.rstrip(b"\0").decode("latin-1", "replace"))
+            try:
+                chunk = P.parse_file_list(r.payload, page)
+            except ValueError as e:
+                raise DeviceRejected(str(e), node=node, page=page) from e
+            if not chunk:
+                return entries
+            entries.extend(chunk)
+        raise DeviceRejected("file list page limit reached", node=node)
+
+    def walk(self, node: int = 0, path: str = "/", max_depth: int = 6, max_nodes: int = 4096,
+             skip: set[int] = frozenset()) -> list[dict]:
+        """Depth-first listing from a node, each entry with its path. skip holds folder nodes not
+        to descend into (the 999-slot sounds root, say)."""
+        out = []
+        stack = [(node, path, 0)]
+        while stack:
+            current, prefix, depth = stack.pop()
+            for entry in self.list_directory(current):
+                full = prefix.rstrip("/") + "/" + entry["name"]
+                out.append({**entry, "path": full, "parent": current, "depth": depth})
+                if len(out) >= max_nodes:
+                    raise DeviceRejected("walk node limit reached", nodes=len(out))
+                if entry["kind"] == "folder" and depth + 1 < max_depth and entry["node"] not in skip:
+                    stack.append((entry["node"], full, depth + 1))
+        return out
+
     def sample_root(self) -> SampleRoot:
         m = self.metadata(P.SAMPLE_ROOT)
         if not m or "max_capacity" not in m:

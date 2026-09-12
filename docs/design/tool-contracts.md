@@ -238,6 +238,20 @@ and reads the record. A key the record did not hold before the change cannot
 be unset over this interface and is listed as `not_restorable`. Separate from
 `undo_last_install`, which only reverts `sym`.
 
+### `list_files(node=0, max_depth=3, include_sounds=False)` — read-only
+A FILE_LIST walk of the id namespace from a node, paging each directory
+until an empty page. Page 0 of the same command is what ep133-ppak calls
+`GROUP_DUMP` (safe); phones24's exporter walks the whole device from node
+0 with it. No file is opened, so it cannot leave the interface wedged the
+way an undrained `FILE_READ_OPEN` can. The sounds root is skipped by
+default (999 slots). This replaces blind STAT enumeration as the way to
+find nodes outside the known map.
+
+### `stat_file(file_id)` — read-only
+STAT (`0x0B`) one id: node, parent, flags, size, name, kind; `exists:
+false` on the device's invalid-id answer. Documented safe for any id, but
+still probed one id at a time on this device.
+
 ### `play_note(channel, note, velocity=100, duration_s=0.25)`
 A plain MIDI note on the device's port, held then released, under the
 operation lock. Nothing persists and no SysEx file is opened, so there is

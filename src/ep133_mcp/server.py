@@ -29,6 +29,7 @@ from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .protocol import decode as _decode
 from .protocol import diffmap as _diffmap
 from .protocol import generate as _generate
+from .protocol.payloads import SAMPLE_ROOT
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
 from .safety.chop import Chopper
@@ -583,6 +584,56 @@ def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: 
         return {"error": "InvalidInput", "message": str(e)}
     except DeviceError as e:
         log.warning("generate_ppak failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="list_files",
+    description=(
+        "Walk the device's file-id namespace with FILE_LIST from a node (default 0, the root), "
+        "returning every entry's node id, kind (file/folder), size, name and path down to "
+        "max_depth. The sounds root (1000, 999 slots) is skipped unless include_sounds is true. "
+        "Read-only and documented safe in both upstream projects (ep133-ppak's GROUP_DUMP is page "
+        "0 of it; phones24 walks from node 0 with it); no file is opened. This is how to find nodes "
+        "outside the known map - the global settings node, for one - without guessing ids."
+    ),
+)
+def list_files(node: int = 0, max_depth: int = 3, include_sounds: bool = False) -> dict[str, Any]:
+    if type(node) is not int or not 0 <= node < 2**16 or type(max_depth) is not int or not 1 <= max_depth <= 8:
+        return {"error": "InvalidInput", "message": "node must be 0..65535 and max_depth 1..8"}
+    try:
+        with _operation_lock:
+            d = _device()
+            d.greet()
+            d.begin_read()
+            entries = d.walk(node, max_depth=max_depth, skip=set() if include_sounds else {SAMPLE_ROOT})
+        return {"node": node, "max_depth": max_depth, "entries": entries, "count": len(entries)}
+    except DeviceError as e:
+        log.warning("list_files failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="stat_file",
+    description=(
+        "STAT one file id (0..65535): node, parent, flags, size, name and kind, or exists=false when "
+        "the device answers invalid id. Read-only; documented safe for any id upstream, but every "
+        "new id on this device is treated as a possible wedge, so probe in small ranges and log "
+        "each id first. Never opens the file."
+    ),
+)
+def stat_file(file_id: int) -> dict[str, Any]:
+    if type(file_id) is not int or not 0 <= file_id < 2**16:
+        return {"error": "InvalidInput", "message": "file_id must be 0..65535"}
+    try:
+        with _operation_lock:
+            d = _device()
+            d.greet()
+            d.begin_read()
+            info = d.stat(file_id)
+        return {"file_id": file_id, "exists": info is not None, **(info or {})}
+    except DeviceError as e:
+        log.warning("stat_file failed: %s", e)
         return _error(e)
 
 
