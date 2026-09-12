@@ -97,8 +97,11 @@ The owner rejected three generated grooves and hand-played their own. Timing
 was fine (40 of 43 onsets within 40 ms) and classification roughly matched the
 clusterer; the losses were ours:
 
-1. **We quantized to 16ths and the device does not.** Their pattern had 3 of 77
-   events on a step, a mean 4.1 ticks (21 ms) off. `transcribe_groove` had
+1. **We quantized to 16ths; the device stores raw ticks.** Their pattern had
+   3 of 77 events on a step, a mean 4.1 ticks (21 ms) off, offsets spread
+   −10…+9 with no coarser grid fitting. (The device *has* a record-quantize
+   setting; this says it was off for that take or is applied at playback — ask
+   the owner which.) `transcribe_groove` had
    measured that displacement and thrown it away. Fixed in `a828b43` — use
    `tick_pattern`, not `pattern`, when feel matters.
 2. **Spectral names are not musical roles.** Their four-on-the-floor landed on

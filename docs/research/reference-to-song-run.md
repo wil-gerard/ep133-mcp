@@ -271,9 +271,12 @@ needed for this).
 
 Five findings, in order of how much they cost us.
 
-1. **We quantize to 16ths; the device does not.** Patterns store 24 ticks per
-   16th and the owner's hand-played bar used them — only 3 of 77 events landed
-   on a step, the rest a mean of 21 ms away. `transcribe_groove` had *measured*
+1. **We quantize to 16ths; the device stores raw ticks.** Patterns store 24
+   ticks per 16th and the owner's hand-played bar used them — only 3 of 77
+   events landed on a step, the rest a mean of 21 ms away, offsets spread
+   −10…+9 ticks with no coarser grid fitting. The device has a record-quantize
+   setting, so this is a fact about the format and that take, not a claim that
+   the device never quantizes. `transcribe_groove` had *measured*
    that displacement (mean 16.3 ms, max 46.3 ms) and then thrown it away,
    because `encode_pattern` only took step strings. **This is the largest single
    loss of feel and it was ours, not the model's** (**verified**).
