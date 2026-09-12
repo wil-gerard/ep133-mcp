@@ -54,7 +54,7 @@ For a client supporting `mcpServers`, replace the path with your checkout:
 | `transcribe_groove` | The clip's drums as `x`/`.` strings per kit pad on a 16th grid, in the shape `generate_ppak` takes |
 | `generate_ppak` | Patch a device-written project (BPM, pads, patterns with per-event note and fader automation, scenes, raw fx/settings floats) into a `.ppak` for Sample Tool import; no device writes |
 | `create_backup` | Write a full `.pak` by reading the device over SysEx; incremental against a base backup |
-| `delete_samples` | Delete unreferenced library slots after confirmation; each slot re-read afterwards (unverified on hardware) |
+| `delete_samples` | Delete unreferenced library slots after confirmation; each slot re-read afterwards (the device rejected the first attempt — `docs/research/delete-proof.md`) |
 | `read_pad` | One pad's complete JSON record plus its slot's, unfiltered |
 | `read_project` | A project decoded: bpm, pad records, patterns (notes and automation apart), scenes, settings floats; live or from a `.pak` |
 | `set_pad` / `set_slot` | Per-pad and per-slot sound parameters (trim, playmode, envelope, pitch, level, pan...) with read-back reporting applied / changed / dropped |
@@ -65,9 +65,13 @@ For a client supporting `mcpServers`, replace the path with your checkout:
 | `list_files` / `stat_file` | Walk the device's file-id namespace; STAT one id |
 | `play_note` | Audition a pad with a MIDI note on the device's port |
 
-The tools from `read_pad` down were built without the device on hand
-(2026-09-11) and are unverified on hardware; each one reads back what it wrote
-and reports it, and `docs/handoff/` says what is still pending a proof.
+Hardware status (OS 2.5.1, 2026-09-12): `read_pad`, `list_pads(fields)`,
+`set_pad`, `set_slot`, `undo_last_pad_change`, `chop_sample`, `undo_last_chop`,
+`check_ppak`, `list_files` and `stat_file` have run on the device and read back
+what they wrote (`docs/research/pad-params-proof.md`, `chop-proof.md`,
+`pad-metadata.md`, `global-settings.md`); a `set_pad` and both chops survived a
+power-cycle. `delete_samples` was rejected by the device on its first try and
+`play_note` has not been heard. `docs/handoff/` says what is still pending.
 
 Pad numbers are visual indices from top left to bottom right: 1 is labelled
 `7`, 7 is labelled `1`, 10 is `.`, and 12 is `ENTER`. Projects are 1–9; groups
