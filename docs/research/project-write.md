@@ -26,7 +26,10 @@ async uploadProjectArchive(file, progress) {
 02 00 <flags u8> <fileId u16 BE> <parentId u16 BE> <size u32 BE> <name> 00
 ```
 
-with `flags = CAPABILITY_READ(4) | FILE_TYPE_FILE(1) = 5`, then
+with `flags = CAPABILITY_READ(4) | FILE_TYPE_DIR(2) = 6` — the call passes
+`isDir = true` (the `!0` argument): a project node is a directory the TAR is
+unpacked into, and the device answers flag 5 with status 1 "project
+directories are directories" (first attempt, 2026-09-12, no wedge) — then
 `SysExFilePutDataRequest(page, chunk)` = `02 01 <page u16 BE> <bytes>` for
 each chunk, then an empty page, then `FILE_INIT` again. The project put
 uses a 15 s timeout (the commit happens on the terminator). `FILE_INIT`'s
@@ -34,9 +37,9 @@ uses a 15 s timeout (the commit happens on the terminator). `FILE_INIT`'s
 the device's unsolicited notifications (the free-space frames seen after a
 delete), which is why our write-mode init is harmless for reads.
 
-This is byte-for-byte our proven sample upload (`02 00 05 <slot> <1000>
-<size> <name> 00 {"channels":1}`) retargeted: fileId = the project node,
-parentId = 2000, name = `NN`, no metadata JSON. `payloads.file_put_project`
+This is our proven sample upload (`02 00 05 <slot> <1000> <size> <name> 00
+{"channels":1}`) retargeted: flags 6, fileId = the project node, parentId =
+2000, name = `NN`, no metadata JSON. `payloads.file_put_project`
 builds it; `DeviceSession.write_project` sends it with the sample upload's
 433-byte pages and re-inits afterwards.
 

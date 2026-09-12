@@ -77,6 +77,14 @@ def test_file_delete_matches_sample_tool_capture():
     assert P.file_delete(30) == bytes.fromhex("06001e")
 
 
+def test_file_put_project_matches_sample_tool():
+    # Sample Tool uploadProjectArchive: put(..., isDir=true, [CAPABILITY_READ]) -> flags 4|2 = 6,
+    # fileId 2000+1000*N, parentId 2000, name "NN". Flag 5 is answered "project directories are
+    # directories" (2026-09-12).
+    assert P.file_put_project(9, 118272) == bytes.fromhex("020006") + bytes.fromhex("2af8") + bytes.fromhex("07d0") \
+        + (118272).to_bytes(4, "big") + b"09\0"
+
+
 def test_metadata_get_matches_capture():
     root = next(f for f in FRAMES if f["label"].startswith("preflight/sample_root"))
     assert unpack(bytes.fromhex(root["sent_hex"])[9:-1]) == P.metadata_get(P.SAMPLE_ROOT, 0)
