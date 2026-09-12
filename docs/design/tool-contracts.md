@@ -210,8 +210,11 @@ owner recognises it; a slot's parameters reach every pad that plays it.
 
 ### `chop_sample(path, project, group, pads, slices, backup_id, confirm=None, playmode="oneshot")`
 One upload, N pads. Slices are planned before any I/O — `{mode: equal,
-count}`, `{mode: onsets}` (extract_kit's detector, backtracked starts, the
-first N of them; needs the audio extra) or explicit `[{start_s, end_s}]` —
+count}`, `{mode: onsets, pick}` (extract_kit's detector, backtracked starts;
+`pick` is `first` — the earliest N, the default, which front-loads a break —
+`strongest` — the N loudest — or `spread` — every len/N-th, so the slices
+span the clip; the detected times and strengths come back either way; needs
+the audio extra) or explicit `[{start_s, end_s}]` —
 and refused when empty, overlapping or out of order; ends clamp to the file.
 Preflight is `install_sample`'s for the slot (backup current, format, size,
 lowest slot absent from the library and from every stored record) and

@@ -54,17 +54,22 @@ def plan_slices(frames: int, slices, count: int, pcm: bytes | None = None) -> tu
         ranges = [{"start": bounds[i], "end": bounds[i + 1]} for i in range(count)]
         detail = {"mode": "equal", "count": count}
     elif isinstance(slices, dict) and slices.get("mode") == "onsets":
-        if set(slices) - {"mode"}:
-            raise InvalidDestination("onset slices take only mode", observed=sorted(slices),
+        if set(slices) - {"mode", "pick"}:
+            raise InvalidDestination("onset slices take only mode and pick", observed=sorted(slices),
                                      next_step="Remove the extra keys.")
+        pick = slices.get("pick", "first")
+        if pick not in ONSET_PICKS:
+            raise InvalidDestination("pick must be one of " + ", ".join(ONSET_PICKS), observed=pick,
+                                     next_step="Correct the pick.")
         onsets = detect_slice_onsets(pcm)
         if len(onsets) < count:
             raise InvalidDestination("Fewer onsets than pads", observed=len(onsets), expected=count,
                                      next_step="Pass fewer pads, use equal slices, or give explicit ranges.")
-        chosen = onsets[:count]
-        starts = [_frame(t, frames, "onset") for t in chosen]
+        chosen = sorted(pick_onsets(onsets, count, pick), key=lambda o: o["start_s"])
+        starts = [_frame(o["start_s"], frames, "onset") for o in chosen]
         ranges = [{"start": starts[i], "end": starts[i + 1] if i + 1 < count else frames} for i in range(count)]
-        detail = {"mode": "onsets", "detected_s": onsets, "used_s": chosen,
+        detail = {"mode": "onsets", "pick": pick, "detected_s": [o["start_s"] for o in onsets],
+                  "strength": [o["strength"] for o in onsets], "used_s": [o["start_s"] for o in chosen],
                   "unused_onsets": len(onsets) - count}
     elif isinstance(slices, list):
         if len(slices) != count:
@@ -95,15 +100,36 @@ def plan_slices(frames: int, slices, count: int, pcm: bytes | None = None) -> tu
     return ranges, detail
 
 
-def detect_slice_onsets(pcm: bytes) -> list[float]:
-    """Backtracked onset times in seconds, from the detector extract_kit uses."""
+# How the N slice starts are chosen from the detected onsets. "first" takes the earliest N, which
+# front-loads a break (observed on hardware: pad 8 of 8 got 70 % of a 2-bar loop -
+# docs/research/chop-proof.md); "strongest" takes the N loudest hits; "spread" takes every
+# (len/N)th onset so the slices cover the whole clip.
+ONSET_PICKS = ("first", "strongest", "spread")
+
+
+def pick_onsets(onsets: list[dict], count: int, pick: str) -> list[dict]:
+    """count of the detected onsets ({start_s, strength}, in time order) by the pick rule."""
+    if pick == "strongest":
+        return sorted(onsets, key=lambda o: -o["strength"])[:count]
+    if pick == "spread":
+        return [onsets[round(i * len(onsets) / count)] for i in range(count)]
+    return onsets[:count]
+
+
+def detect_slice_onsets(pcm: bytes) -> list[dict]:
+    """Backtracked onsets as [{start_s, strength}] in time order, from the detector extract_kit uses.
+
+    Two hits that backtrack to the same start keep the stronger one's strength."""
     from ..audio import deps
     from ..audio.analysis import detect_onsets
     deps.require_modules("librosa", "numpy")
     import numpy as np
     y = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
     found = detect_onsets(y, RATE)
-    return sorted(set(found["starts_s"]))
+    by_start: dict[float, float] = {}
+    for start, strength in zip(found["starts_s"], found["strength"]):
+        by_start[start] = max(strength, by_start.get(start, 0.0))
+    return [{"start_s": t, "strength": by_start[t]} for t in sorted(by_start)]
 
 
 class Chopper:

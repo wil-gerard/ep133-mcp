@@ -40,14 +40,32 @@ def test_explicit_slices():
 
 def test_onset_slices(monkeypatch):
     import ep133_mcp.safety.chop as chop
-    monkeypatch.setattr(chop, "detect_slice_onsets", lambda pcm: [0.0, 0.1, 0.25, 0.7])
+    detected = [{"start_s": t, "strength": k} for t, k in ((0.0, 0.5), (0.1, 1.0), (0.25, 0.2), (0.7, 0.9))]
+    monkeypatch.setattr(chop, "detect_slice_onsets", lambda pcm: detected)
     ranges, detail = plan_slices(46875, {"mode": "onsets"}, 3, b"")
     assert [(r["start"], r["end"]) for r in ranges] == [(0, 4688), (4688, 11719), (11719, 46875)]
-    assert detail["used_s"] == [0.0, 0.1, 0.25] and detail["unused_onsets"] == 1
+    assert detail["pick"] == "first" and detail["used_s"] == [0.0, 0.1, 0.25] and detail["unused_onsets"] == 1
+    assert detail["detected_s"] == [0.0, 0.1, 0.25, 0.7] and detail["strength"] == [0.5, 1.0, 0.2, 0.9]
     with pytest.raises(InvalidDestination):
         plan_slices(46875, {"mode": "onsets"}, 5, b"")
     with pytest.raises(InvalidDestination):
         plan_slices(46875, {"mode": "onsets", "count": 2}, 2, b"")
+    with pytest.raises(InvalidDestination):
+        plan_slices(46875, {"mode": "onsets", "pick": "loudest"}, 2, b"")
+
+
+def test_onset_picks_strongest_and_spread(monkeypatch):
+    import ep133_mcp.safety.chop as chop
+    detected = [{"start_s": t, "strength": k} for t, k in
+                ((0.0, 0.5), (0.1, 1.0), (0.25, 0.2), (0.4, 0.3), (0.55, 0.8), (0.7, 0.9))]
+    monkeypatch.setattr(chop, "detect_slice_onsets", lambda pcm: detected)
+    _, strongest = plan_slices(46875, {"mode": "onsets", "pick": "strongest"}, 3, b"")
+    assert strongest["used_s"] == [0.1, 0.55, 0.7]                    # loudest three, back in time order
+    ranges, spread = plan_slices(46875, {"mode": "onsets", "pick": "spread"}, 3, b"")
+    assert spread["used_s"] == [0.0, 0.25, 0.55]                      # every second onset of six
+    assert ranges[-1]["end"] == 46875 and ranges[0]["start"] == 0
+    _, first = plan_slices(46875, {"mode": "onsets", "pick": "first"}, 3, b"")
+    assert first["used_s"] == [0.0, 0.1, 0.25]
 
 
 def test_onset_detection_on_real_pcm(tmp_path):
@@ -60,7 +78,8 @@ def test_onset_detection_on_real_pcm(tmp_path):
         i = int(at * sr)
         y[i:i + 2000] = np.sin(np.arange(2000) * 0.2) * np.linspace(1, 0, 2000)
     found = detect_slice_onsets((y * 32767).astype("<i2").tobytes())
-    assert len(found) == 3 and all(abs(a - b) < 0.03 for a, b in zip(found, (0.1, 0.4, 0.7)))
+    assert len(found) == 3 and all(abs(o["start_s"] - t) < 0.03 for o, t in zip(found, (0.1, 0.4, 0.7)))
+    assert all(0 < o["strength"] <= 1 for o in found)
 
 
 class ChopDevice(FakeDevice):
