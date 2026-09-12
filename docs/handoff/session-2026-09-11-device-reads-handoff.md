@@ -42,7 +42,9 @@ stored record.
 | owner | **Power-cycle**: A02 write, both chops all persisted; stale pad lengths zeroed on boot | — |
 | 5b | The remaining seven `set_pad` fields on B02 (five applied, bpm/bars dropped) and `set_slot(29)` (all applied); `set_pad` now refuses the three slot-only keys | `0ecb04d`, `8d1c9dc` |
 
-`uv run pytest -q` → **468 passed**.
+| offline | `chop_sample` onset `pick`: `first` / `strongest` / `spread` (the break that front-loaded now spans the clip with either alternative); `check_ppak` reports `trim_frames`; README hardware status | `ee28a91`, `cd8f8e8`, `b29109c` |
+
+`uv run pytest -q` → **469 passed**.
 
 ### check_ppak, live
 
@@ -107,6 +109,8 @@ TE032AS001, OS 2.5.1, pak 1.2.0). File 01 references only slots that exist.
    branch per `delete-proof.md`. `undo_last_chop` (journal `adb595c9…`) →
    D01/D02/D05 cleared → with the owner's "sounds right", `dex complete
    wwevlmnw`. One `set_pad` with `sound.amplitude: 150` to see 0..200 land.
+   Optionally a third chop with `pick: "strongest"` on the same break to
+   hear the difference.
 3. **Sample Tool imports** — the nine files, README order (park on 9, do
    01–08, move to 1, do 09). Answer the slot-overwrite prompt on 01 either
    way. The imports wipe the P1 test writes above, so do 1 first. Then
