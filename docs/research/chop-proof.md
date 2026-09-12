@@ -44,15 +44,25 @@ option would save that round-trip.
 
 **Left in place** for the power-cycle check.
 
+## Power-cycle (owner, 2026-09-12)
+
+`list_pads(1)` after the cycle: B02–B09 on slot 30 with stored lengths
+14850 / 15872 / 16894 / 8193 / 15361 / 3071 / 5629 / 175813 — the eight
+onset trims, unchanged; D01 / D02 / D05 on slot 29 with 31960 / 31961 /
+31960. **Both chops persisted.** Slot 29 was then renamed `jimmybk 2bar`
+(rootnote 48, bpm 88, bars 2) by the `set_slot` proof; slot 30 still reads
+`mcp_sample`.
+
 ## Done-when status (`wwevlmnw`)
 
 - 8-slice chop shows in `list_pads` with distinct trims — yes, both times
   (read back per pad).
 - Undo removes all 8 assignments — 5 of 8 on the old code; all 8 with
   `c638ad2` (unit-tested, not yet run on hardware).
-- Plays correctly / survives power-cycle — owner's ears and power switch.
-  `play_note` was not sent: the channel→group / note→pad map is unknown
-  (`w97sjrl7`) and nothing could be heard from here.
+- Survives power-cycle — yes (above).
+- Plays correctly — owner's ears. `play_note` was not sent: the
+  channel→group / note→pad map is unknown (`w97sjrl7`) and nothing could be
+  heard from here.
 
 Library cost of this proof: slots 29 and 30, 511 366 bytes each; both are
 unreferenced once the pads are cleared and go on the delete list —
