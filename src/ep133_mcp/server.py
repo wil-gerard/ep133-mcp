@@ -37,6 +37,7 @@ from .safety.clear import Clearer
 from .safety.import_project import Importer, check_ppak as _check_ppak
 from .safety.delete import Deleter
 from .safety.install import Installer
+from .safety.library import export_project as _export_project, list_samples as _list_samples
 from .safety.journal import Journal
 from .safety.params import ParamWriter
 from .safety.preflight import validate_destination
@@ -798,6 +799,39 @@ def undo_last_import() -> dict[str, Any]:
             return _importer.undo(_device())
     except DeviceError as e:
         return _error(e)
+
+
+@server.tool(description="Export one project from a local backup to a portable .ppak, including only referenced samples. Preserves original WAV metadata. No device writes; refuses missing dependencies and existing outputs.")
+def export_project(source: str, project: int, out: str, include_samples: bool = True) -> dict[str, Any]:
+    try:
+        return _export_project(source, project, out, include_samples)
+    except DeviceError as e:
+        return _error(e)
+    except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
+
+@server.tool(description="List sample metadata and every stored pad reference across nine projects, including stale references and unreferenced slots. Optional source is a full local backup; otherwise reads the device.")
+def list_samples(source: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _list_samples(None if source else _device(), source)
+    except DeviceError as e:
+        return _error(e)
+    except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
+
+@server.tool(description="Report all stored uses of one sample across nine projects. source optionally reads a full local backup. Does not delete anything.")
+def sample_usage(slot: int, source: str | None = None) -> dict[str, Any]:
+    if type(slot) is not int or not 1 <= slot <= 999:
+        return {"error": "InvalidDestination", "message": "slot must be 1..999"}
+    report = list_samples(source)
+    if "error" in report:
+        return report
+    found = next((s for s in report["samples"] if s["slot"] == slot), None)
+    return {"slot": slot, "present": found is not None, "sample": found,
+            "references": found["references"] if found else report["stale_references"].get(slot, [])}
 
 
 @server.tool(
