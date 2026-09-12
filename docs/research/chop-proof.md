@@ -57,12 +57,38 @@ onset trims, unchanged; D01 / D02 / D05 on slot 29 with 31960 / 31961 /
 
 - 8-slice chop shows in `list_pads` with distinct trims — yes, both times
   (read back per pad).
-- Undo removes all 8 assignments — 5 of 8 on the old code; all 8 with
-  `c638ad2` (unit-tested, not yet run on hardware).
+- Undo removes all 8 assignments — yes, both chops (below).
 - Survives power-cycle — yes (above).
-- Plays correctly — owner's ears. `play_note` was not sent: the
+- Plays correctly — owner, 2026-09-12 morning: group D plays right,
+  B02–B09 in key mode confirmed. `play_note` was not sent: the
   channel→group / note→pad map is unknown (`w97sjrl7`) and nothing could be
   heard from here.
+
+## Undo, both journals (2026-09-12, after the power-cycle)
+
+Two bugs surfaced before a pad moved:
+
+1. `undo_last_chop` took `journal.latest()` and returned early once that
+   record was `undone`, so after reverting `fd6d507e` it could never reach
+   `adb595c9`. Fixed in `1f6bbd0`: the undo walks chop journals newest →
+   oldest and takes the first with a pad still in a revertable status.
+2. The first `sym 0` write (B09) read back as stored **(0, 175813)**: the
+   slot cleared, the length kept. Before the power-cycle the same write on
+   D03–D08 read (0, 0). The two fields are independent
+   (`backup-verification.md`), and the owner's earlier cycle showed the
+   device zeroes stale lengths on boot, so a post-cycle clear leaves the
+   old trim length until the next boot. Both undo paths demanded (0, 0)
+   and stopped at the first pad. Fixed in `374aa3c`: a cleared prior is
+   proven by stored slot 0 plus a pad JSON that resolves to `sym 0`, and
+   the leftover length is reported in `undo_note`.
+
+With both fixes: undo #1 → `fd6d507e` **`undone`**, B02–B09 all `sym 0`
+(B04/B05's absent priors 400/415 cleared, not re-pointed); undo #2 →
+`adb595c9` **`undone`**, D01/D02/D05 cleared (absent priors 549/543/558);
+undo #3 → reports `fd6d507e` again, no writes. `list_pads(1)`: all eleven
+pads `sym 0`, stored lengths 14850…175813 and 31960/31961/31960 left in
+the records, expected to zero on the next boot. Slots 29 and 30 remain in
+the library; `session-13.pak` (`582c8a28…`, base session-12) is current.
 
 Library cost of this proof: slots 29 and 30, 511 366 bytes each; both are
 unreferenced once the pads are cleared and go on the delete list —
