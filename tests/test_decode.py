@@ -30,8 +30,8 @@ def test_pattern_file_separates_notes_automation_and_unknown_types():
     data = bytes([0, 2, 4, 0]) + note(0, 7, 96, 67, 8) + automation(6, 5, 12898) + note(384, 12) + unknown
     out = D.decode_pattern_file(data)
     assert out["bars"] == 2
-    assert out["events"] == [{"pad": 7, "tick": 0, "duration": 96, "note": 67, "byte4": 100, "byte7": 8},
-                             {"pad": 12, "tick": 384, "duration": 24, "note": 60, "byte4": 100, "byte7": 0}]
+    assert out["events"] == [{"pad": 7, "tick": 0, "duration": 96, "note": 67, "velocity": 100, "byte7": 8},
+                             {"pad": 12, "tick": 384, "duration": 24, "note": 60, "velocity": 100, "byte7": 0}]
     assert out["automation"] == [{"tick": 6, "param": 5, "value": 12898, "byte4": 0, "padbits": 0, "byte7": 6}]
     assert out["other"] == [{"tick": 30, "type": 2, "raw": unknown.hex()}]
     with pytest.raises(ValueError):
@@ -76,7 +76,7 @@ def test_decode_project_minimal():
     pad7 = next(p for p in out["pads"] if p["group"] == "A" and p["pad"] == 7)
     assert pad7["stored_slot"] == 16 and pad7["stored_length"] == 37500 and pad7["label"] == "1"
     assert [(p["group"], p["index"], p["bars"], len(p["events"])) for p in out["patterns"]] == [("A", 1, 1, 1), ("B", 3, 2, 0)]
-    assert out["patterns"][0]["events"][0] == {"pad": 7, "tick": 0, "duration": 24, "note": 60, "byte4": 100, "byte7": 0}
+    assert out["patterns"][0]["events"][0] == {"pad": 7, "tick": 0, "duration": 24, "note": 60, "velocity": 100, "byte7": 0}
     assert out["scenes"]["scenes"] == [] and out["fx_settings"]["selector"] == 0
     assert out["members"]["scenes"] == 712
     assert json.dumps(out)  # the MCP tool returns it as-is

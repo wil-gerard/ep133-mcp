@@ -42,7 +42,7 @@ from typing import Any
 
 from .analysis import analyze_reference
 from .errors import InvalidReference
-from ..protocol.patterns import MAX_DURATION as enc_max_duration
+from ..protocol.patterns import MAX_DURATION as enc_max_duration, MAX_VELOCITY
 from .kit import DRUM_CLASSES, drum_features, kit_paths
 
 STEPS_PER_BEAT = 4
@@ -63,8 +63,17 @@ ONSET_WAIT = {"kick": 3, "snare": 3, "hat": 3}
 LOW_DOMINANCE = 0.10          # a mid-band onset with less than this share of the low band is the kick
 HIGH_DOMINANCE = 0.15         # ... and with less than this share of the high band it is the hat
 LEAD_IN_S = 0.05              # silence prepended so a hit at t=0 has a rise to detect
+# The device stores velocity per event (1..127; a pressure recording gave 127 hard, 54..71 soft).
+# Strength is 0..1 relative to the loudest onset of the class, so the loudest hit of each class
+# lands at 127 and a ghost note stays a ghost rather than being flattened to accent level.
+VELOCITY_FLOOR = 40
 N_FFT = 2048
 HOP = 256
+
+
+def velocity_for(strength: float) -> int:
+    """Onset strength 0..1 to a device velocity VELOCITY_FLOOR..127."""
+    return VELOCITY_FLOOR + int(round((MAX_VELOCITY - VELOCITY_FLOOR) * max(0.0, min(1.0, float(strength)))))
 
 
 def slice_ms(pads: list[dict], cls: str) -> float:
@@ -287,9 +296,11 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     last_step: dict[str, float] = {}
     placements = sorted(((t, cls, strength) for cls in pad_of for t, strength in detected.get(cls, ())),
                         key=lambda item: item[0])
+    # "bands" scales strength to each band's own peak, "classify" to the whole stem's; velocity
+    # is relative to the loudest hit of the class either way.
+    peak = {cls: max((s for _, c, s in placements if c == cls), default=1.0) or 1.0 for cls in pad_of}
     for t, cls, strength in placements:
-        # Every hit plays at one velocity, so ghost notes land as loud as accents; dropping the
-        # quiet ones keeps the skeleton of the groove instead of a uniform wall.
+        # min_strength thins the transcription; the hits that stay keep their level below.
         if strength < min_strength:
             weak += 1
             continue
@@ -306,7 +317,8 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
             folded += 1
         rows[cls][nearest % total_steps] = "x"
         tick = int(round(steps * TICKS_PER_STEP)) % (total_steps * TICKS_PER_STEP)
-        events.append({"pad": pad_of[cls], "tick": tick, "duration": durations[cls]})
+        events.append({"pad": pad_of[cls], "tick": tick, "duration": durations[cls],
+                       "velocity": velocity_for(strength / peak[cls])})
         hits[cls] += 1
         errors.append(abs(error) * 1000)
 

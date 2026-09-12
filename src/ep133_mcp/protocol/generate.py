@@ -1,7 +1,7 @@
 """generate_ppak: patch a device-written project and wrap it as a .ppak.
 
-A from-scratch project would have to guess event byte 7, velocity, settings
-bytes 216-221 and fx_settings byte 4. Patching sidesteps all of them: the
+A from-scratch project would have to guess event byte 7, settings bytes
+216-221 and fx_settings byte 4. Patching sidesteps all of them: the
 template is a project TAR the device wrote (read live or taken from a
 backup), and only the fields proven in docs/research/pattern-encoding.md
 change - BPM, pad records' stored slot/length, whole pattern files, and
@@ -27,8 +27,9 @@ PATTERN_FIELDS = {"group", "index", "bars", "steps"}
 PATTERN_ADD_FIELDS = {"group", "index", "add"}
 PATTERN_EVENT_FIELDS = {"group", "index", "bars", "events"}
 SCENE_FIELDS = {"scene", "A", "B", "C", "D"}
-VELOCITY_NOTE = ("'o' steps are encoded exactly like 'x' (note 60, byte 4 = 100): the device has never "
-                 "been seen to store any other velocity, so softer hits are not expressible yet.")
+VELOCITY_NOTE = (f"'o' steps are written at velocity {enc.SOFT_VELOCITY} and 'x' at {enc.DEFAULT_VELOCITY}: event "
+                 "byte 4 is velocity (a pressure recording stored 127 hard, 54..71 soft; "
+                 "docs/research/velocity-proof.md). The events form takes any 1..127 per hit.")
 
 
 class GenerateError(ValueError):
@@ -124,17 +125,19 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
                 seen.add(name)
                 events = item["events"]
                 if not isinstance(events, list) or not events or not all(
-                        isinstance(e, dict) and {"pad", "tick"} <= set(e) <= {"pad", "tick", "duration", "note"}
+                        isinstance(e, dict) and {"pad", "tick"} <= set(e) <= {"pad", "tick", "duration", "note",
+                                                                                "velocity"}
                         for e in events):
                     raise GenerateError(f"events for {name} must be a non-empty list of "
-                                        "{pad, tick, duration?, note?}")
+                                        "{pad, tick, duration?, note?, velocity?}")
                 automation = item.get("automation", [])
                 if not isinstance(automation, list) or not all(
                         isinstance(a, dict) and set(a) == {"tick", "param", "value"} for a in automation):
                     raise GenerateError(f"automation for {name} must be a list of {{tick, param, value}}")
                 files[name] = enc.encode_events(item["bars"], [(e["pad"], e["tick"],
                                                                 e.get("duration", enc.STEP_DURATION),
-                                                                e.get("note", enc.NOTE))
+                                                                e.get("note", enc.NOTE),
+                                                                e.get("velocity", enc.DEFAULT_VELOCITY))
                                                                for e in events],
                                                 [(a["tick"], a["param"], a["value"]) for a in automation])
                 continue

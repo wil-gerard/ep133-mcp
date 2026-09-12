@@ -188,7 +188,7 @@ def read_pad(project: int, group: str, pad: int) -> dict[str, Any]:
     name="read_project",
     description=(
         "Decode a whole project (1..9): bpm, all 48 stored pad records, every pattern file as "
-        "{group, index, bars, events: [{pad, tick, duration, note, byte4, byte7}], automation: "
+        "{group, index, bars, events: [{pad, tick, duration, note, velocity, byte7}], automation: "
         "[{tick, param, value}] for recorded fader moves (type-1 events, never decoded as notes)}, "
         "the scenes file (populated scenes, live pattern per group, selected scene, song), and the "
         "raw settings / fx_settings floats. Ticks are 384 per bar; pads use the list_pads index. "
@@ -569,13 +569,13 @@ def extract_kit(clip: str, want: list[str] | None = None, separation: str = "aut
         "comes out rotated by a beat (likely with the librosa fallback). bars is 1, 2 or 4, "
         "fitted to the clip unless given; onsets outside the bars fold back. Reports the "
         "quantization error in ms, and a tick_pattern holding the same hits at the tick each "
-        "onset fell on, in the events shape generate_ppak takes - prefer it over pattern when "
+        "onset fell on with a velocity 40..127 from its onset strength (loudest hit of each class "
+        "at 127), in the events shape generate_ppak takes - prefer it over pattern when "
         "the feel matters. detector 'classify' (default) gives each onset of the "
         "drums stem one pad; 'bands' detects kick, snare and hat independently in their own "
         "frequency bands, so a kick under a hat is both - much better on real material where "
         "hits coincide, and the only way to recover a four-on-the-floor kick, but not yet exact "
-        "on the synthetic fixture. min_strength (0..1) drops onsets weaker than that, "
-        "which keeps the accents when every hit would otherwise play at one velocity. "
+        "on the synthetic fixture. min_strength (0..1) drops onsets weaker than that. "
         "Every hit is probable. Writes kit/groove.json. No device I/O. Needs the audio extra."
     ),
 )
@@ -603,11 +603,11 @@ def transcribe_groove(clip: str, kit: str | None = None, bars: int | None = None
         "each hit at an exact tick - the device stores 24 ticks per 16th and its own recordings "
         "use them, so the events form is what keeps a transcription's micro-timing and per-class "
         "note lengths (whole pattern files are replaced); an event may carry note (0..127, "
-        "default 60; which pitch a key-mode pad plays for it is unverified) and an events-form "
+        "default 60; which pitch a key-mode pad plays for it is unverified) and velocity (1..127, "
+        "default 100; byte 4 is velocity, proven by a pressure recording) and an events-form "
         "pattern may carry automation [{tick, param, value 0..32767}], the recorded-fader event "
         "shape (param ids 1, 5, 6 seen on this device, meanings unmapped), and scenes [{scene, A, B, C, D}] with a "
-        "pattern index 1..99 per group (1 for a silent group). 'o' encodes like 'x' until "
-        "velocity is proven. fx {selector?, params?: {index 0..33: 0..1}} and settings {params?: "
+        "pattern index 1..99 per group (1 for a silent group). 'o' steps write velocity 60, 'x' 100. fx {selector?, params?: {index 0..33: 0..1}} and settings {params?: "
         "{index 0..47: 0..1}, group_bytes?: {A..D: int}} patch the effect and fader tables by raw "
         "index (values snap to n/256, the device's knob step) - the meanings are only the "
         "hypotheses in docs/research/fx-and-settings-map.md until the mapping session names them. "
@@ -829,7 +829,7 @@ def set_active_project(project: int, backup_id: str, confirm: str | None = None)
         return _error(e)
 
 
-@server.tool(description="Audition simultaneous generate_ppak steps patterns over live MIDI, up to 120 seconds. Requires explicit routing entries {group,pad,channel,note}, since global MIDI routing is not readable. Checks actual active-project assignments. Device must not be recording. Returns immediately; use stop_playback or playback_status. Soft o hits use velocity 60; imported patterns currently encode them as 100.")
+@server.tool(description="Audition simultaneous generate_ppak steps patterns over live MIDI, up to 120 seconds. Requires explicit routing entries {group,pad,channel,note}, since global MIDI routing is not readable. Checks actual active-project assignments. Device must not be recording. Returns immediately; use stop_playback or playback_status. Soft o hits use velocity 60, the same value generate_ppak writes for them.")
 def play_pattern(project: int, patterns: list[dict], routing: list[dict], bpm: float,
                  repeats: int = 1) -> dict[str, Any]:
     try:

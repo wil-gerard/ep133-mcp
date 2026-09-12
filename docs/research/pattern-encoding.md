@@ -104,7 +104,7 @@ pos u16 LE | (pad-1)*8 | note | 100 | duration u16 LE | byte7
 | 2 bits 7..3 | pad index, 0-based (`pad_file = (b>>3)+1`) | verified | with this mapping, 3147 of 3612 note events land on a pad record with non-zero length; the alternatives (`b>>3`, `(b>>3)+2`) score 914 and 1613. The 465 misses cluster on specific pads with a stale slot id and zero length — pads cleared after the pattern was recorded (P03 `d/p03` alone is 192 of them) |
 | 2 bits 2..0 | event type, `0` = note | verified | only values 0 and 1 occur (3612 / 66) |
 | 3 | note number | probable | 21..72; 2315/3612 are 60 (C4 = unpitched trigger). Other values appear on pads that also carry pitched runs (e.g. P05 `c01` pad 4: 60, 67, 72). Not confirmed which pitch the device *plays* for a value ≠ 60 |
-| 4 | velocity? | **unverified** | `100` in **all 3612** note events, from nine projects and ~a dozen sessions. Either this device never records velocity, or byte 4 is not velocity. Upstream also only ever saw 100. Do not assume the device honours other values |
+| 4 | velocity | **verified** (record side) | `100` in all 3612 note events before 2026-09-12, because none was recorded with pad pressure. Two pressure recordings that day (P03 `d06`, `d22`: soft/hard/soft/hard on one pad each) stored **127, 54, 127, 71** and **127, 71, 127, 54** — see [`velocity-proof.md`](velocity-proof.md). Playback of a written value ≠ 100 is not yet heard |
 | 5–6 | duration, ticks, u16 LE | verified | 7..1777, never 0 for notes; upstream's DannyDesert-era "flag bytes" reading is wrong, as upstream already notes |
 | 7 | unknown | **unknown** | 43 distinct values; 0 in 1260 events, 6 in 1390, the rest 8/16/97/129/… with no correlation to pad, position, duration, note or bar. Stable across cloned patterns (P01 `a05`–`a08` are byte-identical clones of `a02`), so it is persisted state, not read noise. Could be uninitialised memory at write time. Upstream writes 0; the device itself writes 0 in a third of events, so 0 is at least a device-produced value |
 
@@ -282,8 +282,8 @@ at boot has cost one upstream contributor a SHIFT+ERASE flash format. Do steps
 1–2 before any step that changes bytes.
 
 Open questions that block a *from-scratch* generator but not a *patch an
-existing project* generator: event byte 7; whether byte 4 is honoured as
-velocity; `settings` bytes 216–221; `fx_settings` byte 4.
+existing project* generator: event byte 7; `settings` bytes 216–221;
+`fx_settings` byte 4. (Byte 4 = velocity was settled on 2026-09-12.)
 
 ## Disagreements with upstream, for reporting
 

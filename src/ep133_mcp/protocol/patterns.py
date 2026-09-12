@@ -2,10 +2,11 @@
 docs/research/pattern-encoding.md. Encoders emit only what the device itself
 writes; decoders exist so tests and the manifest can read the result back.
 
-Note event (8 bytes): pos u16 LE | (pad-1)<<3 | type 0 | note | 100 | duration u16 LE | 0.
-Byte 4 is 100 in every device event (velocity unproven), byte 7 is 0 (a
-device-produced value). 'x' and 'o' both encode the same event until velocity
-is proven, and the generator says so in its response.
+Note event (8 bytes): pos u16 LE | (pad-1)<<3 | type 0 | note | velocity | duration u16 LE | 0.
+Byte 4 is velocity: 100 is what the device stores when it is not reading pad
+pressure, and a pressure-sensitive recording on 2026-09-12 stored 127 for hard
+hits and 54..71 for soft ones (docs/research/velocity-proof.md). 'x' encodes
+100, 'o' encodes SOFT_VELOCITY. Byte 7 is 0 (a device-produced value).
 """
 
 from __future__ import annotations
@@ -21,7 +22,9 @@ MAX_EVENTS = 255                 # header count is one byte
 MAX_BARS = 15                    # highest device-written value
 MAX_PATTERN_INDEX = 99
 NOTE = 60
-VELOCITY_BYTE = 100
+DEFAULT_VELOCITY = 100           # what the device records without pad pressure
+SOFT_VELOCITY = 60               # 'o': inside the 54..71 the device stored for soft hits
+MAX_VELOCITY = 127
 STEP_DURATION = TICKS_PER_STEP
 MAX_DURATION = 0xFFFF
 EVENT_TYPE_NOTE = 0
@@ -51,25 +54,27 @@ def encode_pattern(bars: int, steps: dict[int, str]) -> bytes:
     if type(bars) is not int or not 1 <= bars <= MAX_BARS:
         raise ValueError(f"bars must be 1..{MAX_BARS}")
     length = bars * STEPS_PER_BAR
-    events: list[tuple[int, int]] = []
+    events: list[tuple[int, int, int]] = []
     for pad, row in steps.items():
         if type(pad) is not int or not 1 <= pad <= 12:
             raise ValueError(f"pad must be 1..12: {pad!r}")
         if not isinstance(row, str) or len(row) != length or set(row) - {HIT, SOFT_HIT, REST}:
             raise ValueError(f"steps for pad {pad} must be {length} characters of x, o or .")
-        events.extend((i * TICKS_PER_STEP, pad) for i, ch in enumerate(row) if ch != REST)
+        events.extend((i * TICKS_PER_STEP, pad, SOFT_VELOCITY if ch == SOFT_HIT else DEFAULT_VELOCITY)
+                      for i, ch in enumerate(row) if ch != REST)
     if len(events) > MAX_EVENTS:
         raise ValueError(f"pattern has {len(events)} events; the header holds at most {MAX_EVENTS}")
     events.sort()
     out = bytearray([0, bars, len(events), 0])
-    for position, pad in events:
-        out += struct.pack("<HBBBHB", position, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, VELOCITY_BYTE, STEP_DURATION, 0)
+    for position, pad, velocity in events:
+        out += struct.pack("<HBBBHB", position, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, velocity, STEP_DURATION, 0)
     return bytes(out)
 
 
 def encode_events(bars: int, events: list[tuple], automation: list[tuple[int, int, int]] = ()) -> bytes:
-    """4-byte header plus one note event per (pad, tick, duration[, note]) and one parameter event
-    per (tick, param, value), sorted by tick with notes before automation at the same tick.
+    """4-byte header plus one note event per (pad, tick, duration[, note[, velocity]]) and one
+    parameter event per (tick, param, value), sorted by tick with notes before automation at the
+    same tick.
 
     The device stores TICKS_PER_STEP ticks per 16th and its own recordings use all of them: a
     hand-played bar on this hardware sat a mean of 4 ticks (21 ms) off the 16ths, with 3 of 77
@@ -77,7 +82,9 @@ def encode_events(bars: int, events: list[tuple], automation: list[tuple[int, in
     encoder transcription uses; encode_pattern stays for patterns written as step strings.
 
     note defaults to 60, the value in 2315 of 3612 device events; other values (21..72 seen) sit on
-    pads that carry pitched runs, and which pitch the device plays for them is unverified. A
+    pads that carry pitched runs, and which pitch the device plays for them is unverified. velocity
+    defaults to 100, the device's own value when it records without pad pressure; a pressure
+    recording stored 127 for hard hits and 54..71 for soft ones, so 1..127 is the range. A
     parameter event is `pos | 0x01 | param | 0x00 | value u16 | 0`, the shape of the 66 recorded
     fader moves in the 2026-09-09 backup (ids 1, 5, 6; values 0..32759); the ids' meanings are
     unmapped, so the caller names a number and the device decides."""
@@ -88,6 +95,7 @@ def encode_events(bars: int, events: list[tuple], automation: list[tuple[int, in
     for item in events:
         pad, tick, duration = item[:3]
         note = item[3] if len(item) > 3 else NOTE
+        velocity = item[4] if len(item) > 4 else DEFAULT_VELOCITY
         if type(pad) is not int or not 1 <= pad <= 12:
             raise ValueError(f"pad must be 1..12: {pad!r}")
         if type(tick) is not int or not 0 <= tick < limit:
@@ -96,8 +104,10 @@ def encode_events(bars: int, events: list[tuple], automation: list[tuple[int, in
             raise ValueError(f"duration must be 1..{MAX_DURATION} ticks: {duration!r}")
         if type(note) is not int or not 0 <= note <= MAX_NOTE:
             raise ValueError(f"note must be 0..{MAX_NOTE}: {note!r}")
+        if type(velocity) is not int or not 1 <= velocity <= MAX_VELOCITY:
+            raise ValueError(f"velocity must be 1..{MAX_VELOCITY}: {velocity!r}")
         placed.append((tick, EVENT_TYPE_NOTE, struct.pack("<HBBBHB", tick, (pad - 1) << 3 | EVENT_TYPE_NOTE, note,
-                                                          VELOCITY_BYTE, duration, 0)))
+                                                          velocity, duration, 0)))
     for tick, param, value in automation:
         if type(tick) is not int or not 0 <= tick < limit:
             raise ValueError(f"automation tick must be 0..{limit - 1} for a {bars}-bar pattern: {tick!r}")
@@ -116,14 +126,14 @@ def encode_events(bars: int, events: list[tuple], automation: list[tuple[int, in
 
 
 def decode_pattern(data: bytes) -> dict:
-    """{bars, events: [{pos, pad, type, note, byte4, duration, byte7}]} for any device pattern file."""
+    """{bars, events: [{pos, pad, type, note, velocity, duration, byte7}]} for any device pattern file."""
     if len(data) < PATTERN_HEADER or (len(data) - PATTERN_HEADER) % EVENT_SIZE:
         raise ValueError("pattern size is not 4+8n")
     bars, count = data[1], data[2]
     events = []
     for off in range(PATTERN_HEADER, len(data), EVENT_SIZE):
-        pos, b2, note, b4, duration, b7 = struct.unpack_from("<HBBBHB", data, off)
-        events.append({"pos": pos, "pad": (b2 >> 3) + 1, "type": b2 & 7, "note": note, "byte4": b4,
+        pos, b2, note, velocity, duration, b7 = struct.unpack_from("<HBBBHB", data, off)
+        events.append({"pos": pos, "pad": (b2 >> 3) + 1, "type": b2 & 7, "note": note, "velocity": velocity,
                        "duration": duration, "byte7": b7})
     if count != len(events):
         raise ValueError(f"header count {count} != {len(events)} events")
@@ -152,8 +162,9 @@ def pattern_steps(data: bytes, strict: bool = True) -> dict[int, str]:
 
 
 def pattern_events(data: bytes) -> list[dict]:
-    """Note events as {pad, tick, duration, note}, keeping the tick the device stored."""
-    return [{"pad": e["pad"], "tick": e["pos"], "duration": e["duration"], "note": e["note"]}
+    """Note events as {pad, tick, duration, note, velocity}, keeping the tick the device stored."""
+    return [{"pad": e["pad"], "tick": e["pos"], "duration": e["duration"], "note": e["note"],
+             "velocity": e["velocity"]}
             for e in decode_pattern(data)["events"] if e["type"] == EVENT_TYPE_NOTE]
 
 
@@ -285,7 +296,7 @@ def add_events(data: bytes, hits: list[tuple[int, int]]) -> bytes:
         raise ValueError(f"pattern would hold more than {MAX_EVENTS} events")
     existing = [data[off:off + EVENT_SIZE] for off in range(PATTERN_HEADER, len(data), EVENT_SIZE)]
     merged = [(struct.unpack_from("<H", raw)[0], 0, i, raw) for i, raw in enumerate(existing)]
-    merged += [(pos, 1, i, struct.pack("<HBBBHB", pos, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, VELOCITY_BYTE,
+    merged += [(pos, 1, i, struct.pack("<HBBBHB", pos, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, DEFAULT_VELOCITY,
                                        STEP_DURATION, 0)) for i, (pos, pad) in enumerate(sorted(new))]
     merged.sort(key=lambda item: item[:3])
     return bytes([data[0], decoded["bars"], len(merged), data[3]]) + b"".join(raw for *_, raw in merged)

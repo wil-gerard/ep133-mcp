@@ -81,7 +81,9 @@ Hardware status (OS 2.5.1, 2026-09-12): `read_pad`, `list_pads(fields)`,
 what they wrote (`docs/research/pad-params-proof.md`, `chop-proof.md`,
 `pad-metadata.md`, `global-settings.md`); a `set_pad` and both chops survived a
 power-cycle. `delete_samples` passed corrected-frame hardware checks and backup diffs
-([delete proof](docs/research/delete-proof.md)); `play_note` has not been heard. `docs/handoff/` says what is still pending.
+([delete proof](docs/research/delete-proof.md)); event byte 4 is velocity, read
+back from a pressure recording ([velocity proof](docs/research/velocity-proof.md));
+`play_note` has not been heard. `docs/handoff/` says what is still pending.
 
 Pad numbers are visual indices from top left to bottom right: 1 is labelled
 `7`, 7 is labelled `1`, 10 is `.`, and 12 is `ENTER`. Projects are 1–9; groups

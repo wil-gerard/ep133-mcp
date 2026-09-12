@@ -32,10 +32,11 @@ def test_pattern_encoding_round_trip():
     data = enc.encode_pattern(2, {1: GROOVE["1"], 2: GROOVE["2"], 3: GROOVE["3"]})
     assert data[:4] == bytes([0, 2, 16, 0]) and len(data) == 4 + 8 * 16
     first = struct.unpack_from("<HBBBHB", data, 4)
-    assert first == (0, 0, 60, 100, 24, 0)                        # tick 0, pad 1, note 60, byte4 100, one 16th, byte7 0
+    assert first == (0, 0, 60, 100, 24, 0)                        # tick 0, pad 1, note 60, velocity 100, one 16th, byte7 0
     assert struct.unpack_from("<HBBBHB", data, 12)[:2] == (48, 2 << 3)  # tick 48 = step 2, pad 3
     assert enc.pattern_steps(data) == {1: GROOVE["1"], 2: GROOVE["2"], 3: GROOVE["3"]}
-    assert enc.encode_pattern(1, {5: "o..............."}) == enc.encode_pattern(1, {5: "x..............."})
+    soft, hard = enc.encode_pattern(1, {5: "o..............."}), enc.encode_pattern(1, {5: "x..............."})
+    assert soft[8] == enc.SOFT_VELOCITY and hard[8] == enc.DEFAULT_VELOCITY and soft[:8] + soft[9:] == hard[:8] + hard[9:]
     decoded = pattern_decode.decode_pattern(data)
     assert decoded["bars"] == 2 and decoded["count"] == 16
     assert [e["pos"] for e in decoded["events"]] == sorted(e["pos"] for e in decoded["events"])
@@ -137,8 +138,10 @@ def test_generate_ppak_writes_and_refuses_overwrite(tmp_path):
     with pytest.raises(G.GenerateError):
         G.generate_ppak(template(), 5, tmp_path / "other.pak", META, bpm=100.0)
     soft = G.generate_ppak(template(), 5, tmp_path / "soft.ppak", META,
-                           patterns=[{"group": "A", "index": 1, "bars": 1, "steps": {"1": "o..............."}}])
+                           patterns=[{"group": "A", "index": 1, "bars": 1, "steps": {"1": "o...x..........."}}])
     assert "velocity" in soft["velocity"]
+    written = P.unpack_project(P.read_pak((tmp_path / "soft.ppak").read_bytes())[1][5])["patterns/a01"]
+    assert [e["velocity"] for e in enc.pattern_events(written)] == [enc.SOFT_VELOCITY, enc.DEFAULT_VELOCITY]
 
 
 def test_template_from_pak(tmp_path):
@@ -238,9 +241,9 @@ def test_events_form_places_ticks_and_durations(tmp_path):
             {"pad": 2, "tick": 3, "duration": 46},
             {"pad": 3, "tick": 27, "duration": 94}]}])
     written = P.unpack_project(P.read_pak(out.read_bytes())[1][3])["patterns/d02"]
-    assert enc.pattern_events(written) == [{"pad": 1, "tick": 0, "duration": 18, "note": 60},
-                                           {"pad": 2, "tick": 3, "duration": 46, "note": 60},
-                                           {"pad": 3, "tick": 27, "duration": 94, "note": 60}]
+    assert enc.pattern_events(written) == [{"pad": 1, "tick": 0, "duration": 18, "note": 60, "velocity": 100},
+                                           {"pad": 2, "tick": 3, "duration": 46, "note": 60, "velocity": 100},
+                                           {"pad": 3, "tick": 27, "duration": 94, "note": 60, "velocity": 100}]
     reported = result["patterns_written"]["patterns/d02"]
     assert reported["events"] == 3 and reported["off_grid_ticks"]["max"] == 3
     assert reported["steps"] == {1: "x...............", 2: "x...............", 3: ".x.............."}
@@ -271,9 +274,9 @@ def test_events_form_note_and_automation(tmp_path):
                         {"tick": 6, "param": 5, "value": 8146}]}])
     written = P.unpack_project(P.read_pak(out.read_bytes())[1][3])["patterns/c01"]
     assert written[:4] == bytes([0, 1, 6, 0])
-    assert enc.pattern_events(written) == [{"pad": 4, "tick": 0, "duration": 90, "note": 60},
-                                           {"pad": 4, "tick": 96, "duration": 90, "note": 67},
-                                           {"pad": 4, "tick": 192, "duration": 90, "note": 72}]
+    assert enc.pattern_events(written) == [{"pad": 4, "tick": 0, "duration": 90, "note": 60, "velocity": 100},
+                                           {"pad": 4, "tick": 96, "duration": 90, "note": 67, "velocity": 100},
+                                           {"pad": 4, "tick": 192, "duration": 90, "note": 72, "velocity": 100}]
     assert enc.pattern_automation(written) == [{"tick": 0, "param": 5, "value": 12898},
                                                {"tick": 6, "param": 5, "value": 8146},
                                                {"tick": 96, "param": 5, "value": 0}]
@@ -300,11 +303,40 @@ def test_device_automation_round_trips_through_the_encoder():
     standard the note encoder met - so emitting automation is not a new byte layout."""
     raw = bytes([0, 1, 3, 0]) + struct.pack("<HBBBHB", 0, (2 - 1) << 3, 60, 100, 24, 6) \
         + struct.pack("<HBBBHB", 0, 1, 6, 0, 12898, 97) + struct.pack("<HBBBHB", 6, 1, 6, 0, 10147, 0)
-    notes = [(e["pad"], e["tick"], e["duration"], e["note"]) for e in enc.pattern_events(raw)]
+    notes = [(e["pad"], e["tick"], e["duration"], e["note"], e["velocity"]) for e in enc.pattern_events(raw)]
     auto = [(a["tick"], a["param"], a["value"]) for a in enc.pattern_automation(raw)]
     again = enc.encode_events(1, notes, auto)
     assert len(again) == len(raw)
     assert all(a == b for i, (a, b) in enumerate(zip(again, raw)) if (i - 4) % 8 != 7)
+
+
+def test_events_form_velocity(tmp_path):
+    """Byte 4 is velocity: a pressure recording on the device stored 127 for hard hits and 54..71
+    for soft ones (docs/research/velocity-proof.md), so the events form carries one per hit and
+    the encoder refuses anything outside 1..127."""
+    import zipfile
+
+    files = minimal_project()
+    source = tmp_path / "src.pak"
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("/meta.json", json.dumps({"pak_type": "user", "device_version": "2.5.1"}))
+        z.writestr("/projects/P03.tar", P.pack_project(files))
+    tar, meta, sounds = G.template_from_pak(source, 3)
+    out = tmp_path / "v.ppak"
+    G.generate_ppak(tar, 3, out, meta, patterns=[
+        {"group": "D", "index": 6, "bars": 1, "events": [
+            {"pad": 7, "tick": 368, "duration": 21, "velocity": 71},
+            {"pad": 7, "tick": 81, "duration": 88, "velocity": 127},
+            {"pad": 7, "tick": 182, "duration": 17, "velocity": 54},
+            {"pad": 7, "tick": 280, "duration": 82}]}])
+    written = P.unpack_project(P.read_pak(out.read_bytes())[1][3])["patterns/d06"]
+    assert [(e["tick"], e["velocity"]) for e in enc.pattern_events(written)] == [
+        (81, 127), (182, 54), (280, enc.DEFAULT_VELOCITY), (368, 71)]
+    assert written[4:12] == struct.pack("<HBBBHB", 81, (7 - 1) << 3, 60, 127, 88, 0)
+    for bad in (0, 128, -1, "100", 100.0, True):
+        with pytest.raises(G.GenerateError):
+            G.generate_ppak(tar, 3, tmp_path / f"bad{id(bad)}.ppak", meta, patterns=[
+                {"group": "D", "index": 6, "bars": 1, "events": [{"pad": 7, "tick": 0, "velocity": bad}]}])
 
 
 def test_fx_and_settings_raw_patches(tmp_path):

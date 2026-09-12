@@ -40,7 +40,7 @@ def decode_pattern_file(data: bytes) -> dict:
         kind = b2 & 7
         if kind == enc.EVENT_TYPE_NOTE:
             events.append({"pad": (b2 >> 3) + 1, "tick": pos, "duration": value, "note": b3,
-                           "byte4": b4, "byte7": b7})
+                           "velocity": b4, "byte7": b7})
         elif kind == EVENT_TYPE_PARAM:
             automation.append({"tick": pos, "param": b3, "value": value, "byte4": b4,
                                "padbits": b2 >> 3, "byte7": b7})

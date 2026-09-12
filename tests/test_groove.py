@@ -136,7 +136,7 @@ def test_kit_from_another_clip_is_rejected(fixture, tmp_path):
 
 
 def test_min_strength_drops_weak_onsets(fixture):
-    """Every hit plays at one velocity, so dropping quiet onsets is the only way to keep accents."""
+    """min_strength thins the transcription to its accents."""
     full = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, **FALLBACK)
     assert full['quantization']['below_min_strength'] == 0
     thinned = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, min_strength=0.999, **FALLBACK)
@@ -190,11 +190,18 @@ def test_tick_pattern_keeps_micro_timing(fixture):
     assert len(tick['events']) == record['quantization']['placed']
     limit = tick['bars'] * groove.STEPS_PER_BAR * enc.TICKS_PER_STEP
     assert all(0 <= e['tick'] < limit and e['duration'] >= 1 for e in tick['events'])
+    # Byte 4 is velocity (docs/research/velocity-proof.md): each hit carries its onset strength as
+    # 40..127, with the loudest hit of each class at 127 so accents and ghosts stay apart.
+    assert all(groove.VELOCITY_FLOOR <= e['velocity'] <= enc.MAX_VELOCITY for e in tick['events'])
+    for pad in {e['pad'] for e in tick['events']}:
+        assert max(e['velocity'] for e in tick['events'] if e['pad'] == pad) == enc.MAX_VELOCITY
     assert [e['tick'] for e in tick['events']] == sorted(e['tick'] for e in tick['events'])
     # Each class keeps a note length of its own, from the slice extract_kit cut for it.
     by_pad = {e['pad']: e['duration'] for e in tick['events']}
     assert len(set(by_pad.values())) > 1
     # The events round-trip through the encoder and land on the same steps as the string form.
-    data = enc.encode_events(tick['bars'], [(e['pad'], e['tick'], e['duration']) for e in tick['events']])
+    data = enc.encode_events(tick['bars'], [(e['pad'], e['tick'], e['duration'], enc.NOTE, e['velocity'])
+                                            for e in tick['events']])
+    assert [e['velocity'] for e in enc.pattern_events(data)] == [e['velocity'] for e in tick['events']]
     assert enc.pattern_steps(data, strict=False) == {int(p): r for p, r in record['pattern']['steps'].items()
                                                      if 'x' in r}
