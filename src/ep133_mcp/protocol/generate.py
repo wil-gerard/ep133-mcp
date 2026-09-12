@@ -57,8 +57,23 @@ def _ranges(before: bytes, after: bytes) -> list[dict]:
     return out
 
 
+FX_FIELDS = {"selector", "params"}
+SETTINGS_FIELDS = {"params", "group_bytes"}
+
+
+def _indexed(table, what: str) -> dict[int, float]:
+    if not isinstance(table, dict):
+        raise GenerateError(f"{what} must be an object of index: value")
+    out = {}
+    for key, value in table.items():
+        index = int(key) if isinstance(key, str) and key.isdigit() else key
+        out[index] = value
+    return out
+
+
 def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | None = None,
-                  patterns: list[dict] | None = None, scenes: list[dict] | None = None) -> tuple[bytes, list[dict]]:
+                  patterns: list[dict] | None = None, scenes: list[dict] | None = None,
+                  fx: dict | None = None, settings: dict | None = None) -> tuple[bytes, list[dict]]:
     """(patched TAR, manifest). Raises GenerateError for anything outside the proven fields."""
     try:
         files = unpack_project(template)
@@ -136,6 +151,24 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
                 key = int(pad) if isinstance(pad, str) and pad.isdigit() else pad
                 rows[key] = row
             files[name] = enc.encode_pattern(item["bars"], rows)
+        if fx is not None:
+            if not isinstance(fx, dict) or not fx or set(fx) - FX_FIELDS:
+                raise GenerateError(f"fx takes {sorted(FX_FIELDS)}: {fx!r}")
+            if "fx_settings" not in files:
+                raise GenerateError("template has no fx_settings file")
+            files["fx_settings"] = enc.patch_fx_settings(files["fx_settings"], fx.get("selector"),
+                                                         _indexed(fx.get("params", {}), "fx.params"))
+        if settings is not None:
+            if not isinstance(settings, dict) or not settings or set(settings) - SETTINGS_FIELDS:
+                raise GenerateError(f"settings takes {sorted(SETTINGS_FIELDS)}: {settings!r}")
+            if "settings" not in files:
+                raise GenerateError("template has no settings file")
+            group_bytes = settings.get("group_bytes", {})
+            if not isinstance(group_bytes, dict):
+                raise GenerateError("settings.group_bytes must be an object of group: value")
+            files["settings"] = enc.patch_settings_params(files["settings"],
+                                                          _indexed(settings.get("params", {}), "settings.params"),
+                                                          group_bytes)
         for item in scenes or []:
             _require_fields(item, SCENE_FIELDS, "scenes")
             if "scenes" not in files:
@@ -169,16 +202,17 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
 
 def generate_ppak(template: bytes, project: int, out: str | Path, meta: dict, *, bpm: float | None = None,
                   pads: list[dict] | None = None, patterns: list[dict] | None = None,
-                  scenes: list[dict] | None = None, sounds: dict[str, bytes] | None = None) -> dict:
+                  scenes: list[dict] | None = None, sounds: dict[str, bytes] | None = None,
+                  fx: dict | None = None, settings: dict | None = None) -> dict:
     """Patch the template, write <out>.ppak, and describe every change. meta is a backup's meta.json."""
     out = Path(out).expanduser()
     if out.suffix != ".ppak":
         raise GenerateError("output path must end in .ppak")
     if out.exists():
         raise GenerateError(f"refusing to overwrite {out}")
-    if not any((bpm is not None, pads, patterns, scenes)):
-        raise GenerateError("nothing to change: give bpm, pads, patterns or scenes")
-    tar, manifest = patch_project(template, bpm, pads, patterns, scenes)
+    if not any((bpm is not None, pads, patterns, scenes, fx, settings)):
+        raise GenerateError("nothing to change: give bpm, pads, patterns, scenes, fx or settings")
+    tar, manifest = patch_project(template, bpm, pads, patterns, scenes, fx, settings)
     chosen = referenced_sounds(tar, sounds) if sounds else {}
     data = build_ppak(project, tar, project_meta(meta), chosen)
     out.parent.mkdir(parents=True, exist_ok=True)

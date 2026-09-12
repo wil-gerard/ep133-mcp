@@ -305,3 +305,31 @@ def test_device_automation_round_trips_through_the_encoder():
     again = enc.encode_events(1, notes, auto)
     assert len(again) == len(raw)
     assert all(a == b for i, (a, b) in enumerate(zip(again, raw)) if (i - 4) % 8 != 7)
+
+
+def test_fx_and_settings_raw_patches(tmp_path):
+    """Effect selector and knob floats, fader floats and group bytes, by index: bytes land where the
+    decoders read them, snapped to n/256, and the manifest names the ranges."""
+    files = minimal_project()
+    tar = P.pack_project(files)
+    out = tmp_path / "fx.ppak"
+    result = G.generate_ppak(tar, 7, out, {"device_version": "2.5.1"},
+                             fx={"selector": 6, "params": {"1": 1.0, "18": 0.3333}},
+                             settings={"params": {"17": 0.75}, "group_bytes": {"B": 5}})
+    written = P.unpack_project(P.read_pak(out.read_bytes())[1][7])
+    from ep133_mcp.protocol import decode as D
+    fx = D.decode_fx_settings(written["fx_settings"])
+    assert fx["selector"] == 6 and fx["params"][1] == 1.0 and fx["params"][18] == pytest.approx(85 / 256)
+    settings = D.decode_settings(written["settings"])
+    assert settings["params"][17] == 0.75 and settings["group_bytes"] == [0, 5, 0, 0] and settings["bpm"] == 120.0
+    members = {m["member"]: m for m in result["manifest"]}
+    spans = [(r["offset"], r["offset"] + r["length"]) for r in members["fx_settings"]["ranges"]]
+    assert [(4, 5)] + [(a, b) for a, b in spans if 12 <= a < 16] + [(a, b) for a, b in spans if 80 <= a < 84] == spans
+    spans = [(r["offset"], r["offset"] + r["length"]) for r in members["settings"]["ranges"]]
+    assert all(92 <= a < 96 or (a, b) == (217, 218) for a, b in spans) and len(spans) == 2
+    for bad in ({"fx": {"selector": 256}}, {"fx": {"params": {"34": 0.5}}}, {"fx": {"params": {"1": 1.5}}},
+                {"fx": {"type": 1}}, {"fx": {}}, {"settings": {"params": {"48": 0.0}}},
+                {"settings": {"group_bytes": {"E": 1}}}, {"settings": {"group_bytes": {"A": -1}}},
+                {"settings": {"params": {"1": -1.0}}}, {"settings": {"faders": []}}):
+        with pytest.raises(G.GenerateError):
+            G.generate_ppak(tar, 7, tmp_path / f"bad{id(bad)}.ppak", {"device_version": "2.5.1"}, **bad)

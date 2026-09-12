@@ -200,6 +200,57 @@ def patch_bpm(settings: bytes, bpm: float) -> bytes:
     return settings[:BPM_OFFSET] + struct.pack("<f", float(bpm)) + settings[BPM_OFFSET + 4:]
 
 
+SETTINGS_PARAMS_OFFSET = 24
+SETTINGS_PARAMS = 48
+SETTINGS_GROUP_BYTES = 216
+FX_SELECTOR_OFFSET = 4
+FX_PARAMS_OFFSET = 8
+FX_PARAMS = 34
+FX_SIZES = (144, 160)
+KNOB_STEP = 256                  # every device-written knob float is n/256
+
+
+def _knob(value) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 <= value <= 1.0:
+        raise ValueError("knob values are 0.0..1.0")
+    return round(value * KNOB_STEP) / KNOB_STEP
+
+
+def patch_settings_params(settings: bytes, params: dict[int, float], group_bytes: dict[str, int]) -> bytes:
+    """Raw patches to settings floats (index 0..47, snapped to n/256) and the four group bytes.
+
+    Meanings are the hypotheses in docs/research/fx-and-settings-map.md (params[12*g + f] = fader
+    function f of group g; group byte = assigned function); this only places bytes."""
+    if len(settings) not in SETTINGS_SIZES:
+        raise ValueError(f"settings file must be one of {SETTINGS_SIZES} bytes")
+    out = bytearray(settings)
+    for index, value in params.items():
+        if type(index) is not int or not 0 <= index < SETTINGS_PARAMS:
+            raise ValueError(f"settings param index must be 0..{SETTINGS_PARAMS - 1}: {index!r}")
+        struct.pack_into("<f", out, SETTINGS_PARAMS_OFFSET + 4 * index, _knob(value))
+    for group, value in group_bytes.items():
+        if group not in GROUPS or type(value) is not int or not 0 <= value <= 255:
+            raise ValueError(f"group byte must be group A..D and 0..255: {group!r}={value!r}")
+        out[SETTINGS_GROUP_BYTES + GROUPS.index(group)] = value
+    return bytes(out)
+
+
+def patch_fx_settings(fx: bytes, selector: int | None, params: dict[int, float]) -> bytes:
+    """Raw patches to the effect selector byte and the 34 knob floats (snapped to n/256)."""
+    if len(fx) not in FX_SIZES:
+        raise ValueError(f"fx_settings file must be one of {FX_SIZES} bytes")
+    out = bytearray(fx)
+    if selector is not None:
+        if type(selector) is not int or not 0 <= selector <= 255:
+            raise ValueError("fx selector must be 0..255")
+        out[FX_SELECTOR_OFFSET] = selector
+    for index, value in params.items():
+        if type(index) is not int or not 0 <= index < FX_PARAMS:
+            raise ValueError(f"fx param index must be 0..{FX_PARAMS - 1}: {index!r}")
+        struct.pack_into("<f", out, FX_PARAMS_OFFSET + 4 * index, _knob(value))
+    return bytes(out)
+
+
 def decode_bpm(settings: bytes) -> float:
     return struct.unpack_from("<f", settings, BPM_OFFSET)[0]
 

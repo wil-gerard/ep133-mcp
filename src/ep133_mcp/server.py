@@ -549,7 +549,11 @@ def transcribe_groove(clip: str, kit: str | None = None, bars: int | None = None
         "pattern may carry automation [{tick, param, value 0..32767}], the recorded-fader event "
         "shape (param ids 1, 5, 6 seen on this device, meanings unmapped), and scenes [{scene, A, B, C, D}] with a "
         "pattern index 1..99 per group (1 for a silent group). 'o' encodes like 'x' until "
-        "velocity is proven. Unknown fields are rejected; song mode is unsupported. Returns "
+        "velocity is proven. fx {selector?, params?: {index 0..33: 0..1}} and settings {params?: "
+        "{index 0..47: 0..1}, group_bytes?: {A..D: int}} patch the effect and fader tables by raw "
+        "index (values snap to n/256, the device's knob step) - the meanings are only the "
+        "hypotheses in docs/research/fx-and-settings-map.md until the mapping session names them. "
+        "Unknown fields are rejected; song mode is unsupported. Returns "
         "a manifest of every byte range that differs from the template and the decoded "
         "patterns. Whether the device accepts the file is unverified until the import "
         "ladder passes; import only into a non-active project after a fresh backup. Never "
@@ -558,7 +562,8 @@ def transcribe_groove(clip: str, kit: str | None = None, bars: int | None = None
 )
 def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: float | None = None,
                   pads: list[dict[str, Any]] | None = None, patterns: list[dict[str, Any]] | None = None,
-                  scenes: list[dict[str, Any]] | None = None, include_sounds: bool = False) -> dict[str, Any]:
+                  scenes: list[dict[str, Any]] | None = None, include_sounds: bool = False,
+                  fx: dict[str, Any] | None = None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if type(project) is not int or not 1 <= project <= 9:
         return {"error": "InvalidProject", "message": "project must be 1..9"}
     try:
@@ -572,7 +577,8 @@ def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: 
             meta = {"device_sku": g.sku, "base_sku": g.base_sku, "device_version": g.os_version}
             sounds = {}
         return _generate.generate_ppak(template, project, out, meta, bpm=bpm, pads=pads, patterns=patterns,
-                                       scenes=scenes, sounds=sounds if include_sounds else None)
+                                       scenes=scenes, sounds=sounds if include_sounds else None, fx=fx,
+                                       settings=settings)
     except _generate.GenerateError as e:
         return {"error": "InvalidInput", "message": str(e)}
     except DeviceError as e:
