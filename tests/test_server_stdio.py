@@ -29,7 +29,7 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
+                     "read_pad", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
                      "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
 
 
@@ -146,8 +146,10 @@ class Device(FakeDevice):
         return SimpleNamespace(max_capacity=64000000, free_space_in_bytes=self.free, native_rate=46875)
     def active_project(self):
         return 1
-    def list_pads(self, project=None):
-        return {'project': project or 1, 'pads': []}
+    def list_pads(self, project=None, fields=False):
+        return {'project': project or 1, 'pads': [], 'fields': fields}
+    def read_pad(self, project, group, pad):
+        return {'project': project, 'group': group, 'pad': pad, 'sym': 0, 'pad_metadata': {'sym': 0}, 'slot_metadata': None}
     def close(self):
         pass
 module._session = Device()
@@ -162,6 +164,10 @@ module.main()
             info = _payload(await session.call_tool('device_info'))
             assert info['sku'] == 'TE032AS001' and 'serial' not in info
             assert _payload(await session.call_tool('list_pads'))['project'] == 1
+            assert _payload(await session.call_tool('list_pads', {'project': 2, 'fields': True}))['fields'] is True
+            assert _payload(await session.call_tool('read_pad', {'project': 1, 'group': 'A', 'pad': 7}))['sym'] == 0
+            bad = _payload(await session.call_tool('read_pad', {'project': 1, 'group': 'E', 'pad': 7}))
+            assert bad['error'] == 'InvalidDestination'
             assert _payload(await session.call_tool('restore_procedure'))['type'] == 'guidance'
             invalid = await session.call_tool('install_sample', {'path': str(wav)})
             assert invalid.is_error

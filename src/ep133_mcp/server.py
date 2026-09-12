@@ -30,6 +30,7 @@ from .safety.capture import create_backup as _create_backup
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
+from .safety.preflight import validate_destination
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -119,17 +120,44 @@ def device_info(include_serial: bool = False) -> dict[str, Any]:
     description=(
         "Read all 48 pads in a project (1–9, default active). Returns resolved sym, "
         "stored slot and length, and stale_reference for nonzero stored slots "
-        "absent from the library. Reads fresh project TAR and metadata."
+        "absent from the library. With fields=true each pad also carries metadata: the whole "
+        "JSON record the device holds for the pad node (playmode, trim, envelope, pitch, level, "
+        "pan, mute group, time mode, MIDI channel - whatever this OS returns, unfiltered). "
+        "Reads fresh project TAR and metadata."
     ),
 )
-def list_pads(project: int | None = None) -> dict[str, Any]:
+def list_pads(project: int | None = None, fields: bool = False) -> dict[str, Any]:
     if project is not None and not 1 <= project <= 9:
         return {"error": "InvalidProject", "message": "project must be 1..9"}
     try:
         with _operation_lock:
-            return _device().list_pads(project)
+            return _device().list_pads(project, fields=bool(fields))
     except DeviceError as e:
         log.warning("list_pads failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="read_pad",
+    description=(
+        "Read one pad's complete JSON metadata (project 1..9, group A..D, pad index 1..12 in "
+        "the list_pads numbering) and, when its sym resolves to a library slot, that slot's "
+        "complete JSON too (name, channels, samplerate, crc, sample.start/end, loop points, "
+        "playmode, envelope, pitch, level, pan, root note, time mode, bpm, bars). Read-only; "
+        "every key the device returns is passed through unfiltered so a write can be proven "
+        "by reading back. The device rewrites its own state while running, so nothing is cached."
+    ),
+)
+def read_pad(project: int, group: str, pad: int) -> dict[str, Any]:
+    try:
+        validate_destination(project, group, pad)
+    except DeviceError as e:
+        return _error(e)
+    try:
+        with _operation_lock:
+            return _device().read_pad(project, group, pad)
+    except DeviceError as e:
+        log.warning("read_pad failed: %s", e)
         return _error(e)
 
 

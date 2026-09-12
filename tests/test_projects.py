@@ -95,11 +95,13 @@ def test_stale_slot_is_visible_despite_zero_sym():
     d.project_tar = Mock(return_value=archive())
     d.begin_read = Mock()
     d.slot_exists = Mock(return_value=False)
-    d.pad_sym = Mock(return_value=0)
+    d.pad_metadata = Mock(return_value={"sym": 0, "sound.playmode": "oneshot"})
     pads = d.list_pads(1)["pads"]
     assert pads[6]["stale_reference"] is True
     assert pads[6]["stored_slot"] == 16 and pads[6]["sym"] == 0
     assert pads[0]["stale_reference"] is False
+    assert "metadata" not in pads[0]
     d.slot_exists.reset_mock()
-    d.list_pads(1)
+    pads = d.list_pads(1, fields=True)["pads"]
     assert d.slot_exists.call_count == 2  # fresh existence checks on each call
+    assert pads[0]["metadata"] == {"sym": 0, "sound.playmode": "oneshot"}

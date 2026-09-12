@@ -216,16 +216,35 @@ class DeviceSession:
             raise DeviceRejected("project root metadata unavailable", observed=m)
         return P.project_base(int(m["active"]))
 
+    def pad_metadata(self, project: int, group: str, pad_num: int) -> dict:
+        """The whole JSON record the device holds for a pad node.
+
+        `sym` is the resolved slot (0 when unassigned or stale); the other keys are the per-pad
+        sound parameters upstream PROTOCOL.md section 6 lists. Which keys this OS actually returns is
+        recorded in docs/research/pad-metadata.md as they are observed."""
+        m = self.metadata(P.pad_node(project, group, pad_num))
+        if m is None or "sym" not in m:
+            raise DeviceRejected("pad metadata unavailable", observed=m)
+        return m
+
     def pad_sym(self, project: int, group: str, pad_num: int) -> int:
         """Resolved slot for a pad; 0 means the device considers it unassigned.
 
         A stale stored slot also reads 0 here. Only a project TAR read shows
         the stored field.
         """
-        m = self.metadata(P.pad_node(project, group, pad_num))
-        if m is None or "sym" not in m:
-            raise DeviceRejected("pad metadata unavailable", observed=m)
-        return int(m["sym"] or 0)
+        return int(self.pad_metadata(project, group, pad_num)["sym"] or 0)
+
+    def read_pad(self, project: int, group: str, pad_num: int) -> dict:
+        """One pad's full JSON plus, when it resolves to a slot, that slot's full JSON."""
+        node = P.pad_node(project, group, pad_num)  # validate before any I/O
+        self.greet()
+        self.begin_read()
+        pad = self.pad_metadata(project, group, pad_num)
+        sym = int(pad["sym"] or 0)
+        slot = self.metadata(sym) if sym else None
+        return {"project": project, "group": group, "pad": pad_num, "label": P.PAD_LABELS[pad_num],
+                "node": node, "sym": sym, "pad_metadata": pad, "slot_metadata": slot}
 
 
     def project_tar(self, project: int) -> bytes:
@@ -297,7 +316,8 @@ class DeviceSession:
             return False
         raise DeviceRejected("slot existence unknown", slot=slot, status=r.status)
 
-    def list_pads(self, project: int | None = None) -> dict:
+    def list_pads(self, project: int | None = None, fields: bool = False) -> dict:
+        """All 48 pads with stored slot/length, resolved sym and, with fields, the whole pad JSON."""
         if project is not None:
             projects.project_open(project)
         else:
@@ -313,8 +333,11 @@ class DeviceSession:
         # call, never cached across calls or inferred from resolved sym.
         exists = {slot: self.slot_exists(slot) for slot in {p["stored_slot"] for p in pads}}
         for pad in pads:
-            pad["sym"] = self.pad_sym(project, pad["group"], pad["pad"])
+            metadata = self.pad_metadata(project, pad["group"], pad["pad"])
+            pad["sym"] = int(metadata["sym"] or 0)
             pad["node"] = P.pad_node(project, pad["group"], pad["pad"])
+            if fields:
+                pad["metadata"] = metadata
             pad["stale_reference"] = pad["stored_slot"] != 0 and not exists[pad["stored_slot"]]
         return {"project": project, "pads": pads}
 

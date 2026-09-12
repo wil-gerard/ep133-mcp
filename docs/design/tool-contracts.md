@@ -122,6 +122,17 @@ For the requested project (default: active), all 48 pads with both the resolved
 slot does not exist in the library are flagged `stale_reference`. This is the
 view that makes the silent-arming hazard visible.
 
+`fields=true` attaches each pad's whole JSON record as `metadata` (48 extra
+metadata reads); the default stays cheap.
+
+### `read_pad(project, group, pad)` — read-only
+One pad's complete JSON record from its metadata node, plus the referenced
+slot's complete JSON when `sym` resolves. Every key the device returns is
+passed through unfiltered — this is the read-back every write in the
+full-access epic is proven against, so it must never hide a field the device
+added or dropped. Destination is validated before any I/O; `sym` 0 means no
+slot read is attempted. Nothing is cached.
+
 ### `verify_backup(path)` — read-only
 As above. Returns `backup_id`.
 
