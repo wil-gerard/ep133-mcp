@@ -27,6 +27,7 @@ from .audio.kit import extract_kit as _extract_kit
 from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
 from .protocol import decode as _decode
+from .protocol import diffmap as _diffmap
 from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
@@ -576,6 +577,41 @@ def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: 
         return {"error": "InvalidInput", "message": str(e)}
     except DeviceError as e:
         log.warning("generate_ppak failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="diff_project",
+    description=(
+        "Name every byte that differs in one project (1..9) between two copies: old is a .pak/.ppak "
+        "path; new is another path or, when omitted, a live read of the device. settings and "
+        "fx_settings changes come back as named fields - bpm, settings.params[i] (with the group "
+        "and fader-function index the 4x12 layout hypothesis gives), settings group bytes, "
+        "fx_settings.selector, fx_settings.params[i] - with before/after floats and the n/256 knob "
+        "step; pads, patterns and scenes come back as byte ranges so a stray edit is visible. "
+        "This is the loop for the diff method (docs/research/fx-and-settings-map.md): the owner "
+        "changes one control, the agent calls this, the offset gets a name. Read-only."
+    ),
+)
+def diff_project(project: int, old: str, new: str | None = None) -> dict[str, Any]:
+    if type(project) is not int or not 1 <= project <= 9:
+        return {"error": "InvalidProject", "message": "project must be 1..9"}
+    try:
+        old_tar = _decode.project_from_pak(Path(old).expanduser().read_bytes(), project)
+        if new is not None:
+            new_tar = _decode.project_from_pak(Path(new).expanduser().read_bytes(), project)
+            source = {"old": old, "new": new}
+        else:
+            with _operation_lock:
+                d = _device()
+                d.greet()
+                new_tar = d.project_tar(project)
+            source = {"old": old, "new": "device"}
+        return {"project": project, **source, **_diffmap.diff_project_floats(old_tar, new_tar)}
+    except (ValueError, OSError, tarfile.TarError, zipfile.BadZipFile) as e:
+        return {"error": "InvalidInput", "message": str(e)}
+    except DeviceError as e:
+        log.warning("diff_project failed: %s", e)
         return _error(e)
 
 

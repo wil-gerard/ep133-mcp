@@ -238,6 +238,15 @@ and reads the record. A key the record did not hold before the change cannot
 be unset over this interface and is listed as `not_restorable`. Separate from
 `undo_last_install`, which only reverts `sym`.
 
+### `diff_project(project, old, new=None)` — read-only
+The diff method's loop. `old` is a `.pak`/`.ppak`; `new` another one or,
+omitted, a live read. `settings` and `fx_settings` differences come back as
+named fields (`bpm`, `params[i]` with the 4×12 group/function reading,
+group bytes, `selector`) with before/after floats and the n/256 knob step;
+bytes outside the named fields are reported as `unnamed` ranges so nothing
+that moved is hidden; every other member is byte ranges or added/removed/
+resized. Hypotheses and procedure: `docs/research/fx-and-settings-map.md`.
+
 ### `check_ppak(path, project)` — read-only
 The preflight of the not-yet-possible `import_ppak`, shipped on its own
 because Sample Tool asks for a project number instead of reading it from

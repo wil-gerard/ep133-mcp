@@ -30,7 +30,7 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "chop_sample", "undo_last_chop", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
-                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak"}
+                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak", "diff_project"}
 
 
 @pytest.mark.asyncio
@@ -216,6 +216,10 @@ module.main()
             assert missing['error'] == 'InvalidInput'
             live_read = _payload(await session.call_tool('read_project', {'project': 1}))
             assert live_read['source'] == 'device' and live_read['bpm'] is None and live_read['patterns'] == []
+            diffed = _payload(await session.call_tool('diff_project', {
+                'project': 7, 'old': str(template), 'new': str(tmp_path / 'out.ppak')}))
+            assert diffed['identical'] is False and diffed['settings'][0]['field'] == 'bpm'
+            assert [o['member'] for o in diffed['other']] == ['patterns/a02', 'scenes']
             checked = _payload(await session.call_tool('check_ppak', {'path': str(tmp_path / 'out.ppak'), 'project': 7}))
             assert checked['status'] == 'ok' and checked['device']['active_project'] == 1
             wrong = _payload(await session.call_tool('check_ppak', {'path': str(tmp_path / 'out.ppak'), 'project': 1}))
