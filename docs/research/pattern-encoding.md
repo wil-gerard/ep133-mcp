@@ -150,6 +150,15 @@ Decoding every note-only pattern into upstream `Event`s and re-encoding with
 So for note data the write side is not "probably understood" — it is
 byte-exact against 309 device-written files, modulo a byte we cannot yet name.
 
+*Update 2026-09-11:* `patterns.encode_events` now emits type-1 events too
+(`automation=[(tick, param, value)]`) and a per-event `note`. Decoding every
+pattern in `session-07.pak` (376 files, 5 with automation) and re-encoding:
+132 identical, 242 identical except byte 7, 2 not encodable (P09 `a05`/`a06`,
+the shortened patterns whose events sit past the loop end — the encoder
+refuses ticks beyond `bars × 384`). The five automation files round-trip on
+the same terms as the note files. Whether the device *plays* an emitted
+sweep, or a note ≠ 60, is still a hardware question (Dex `rfih4h0f`).
+
 ### Pattern numbering
 
 Files are `patterns/{group}{NN}` with no slash (upstream's `pattern_filename`

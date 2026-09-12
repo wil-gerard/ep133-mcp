@@ -101,20 +101,27 @@ def patch_project(template: bytes, bpm: float | None = None, pads: list[dict] | 
             if isinstance(item, dict) and "events" in item:
                 # Tick-accurate form: the device stores 24 ticks per 16th and its own recordings
                 # use all of them, so a transcription keeps the onset where it actually fell.
-                _require_fields(item, PATTERN_EVENT_FIELDS, "patterns (events form)")
+                _require_fields(item, PATTERN_EVENT_FIELDS | ({"automation"} if "automation" in item else set()),
+                                "patterns (events form)")
                 name = enc.pattern_member(item["group"], item["index"])
                 if name in seen:
                     raise GenerateError(f"pattern {name} given twice")
                 seen.add(name)
                 events = item["events"]
                 if not isinstance(events, list) or not events or not all(
-                        isinstance(e, dict) and {"pad", "tick"} <= set(e) <= {"pad", "tick", "duration"}
+                        isinstance(e, dict) and {"pad", "tick"} <= set(e) <= {"pad", "tick", "duration", "note"}
                         for e in events):
                     raise GenerateError(f"events for {name} must be a non-empty list of "
-                                        "{pad, tick, duration?}")
+                                        "{pad, tick, duration?, note?}")
+                automation = item.get("automation", [])
+                if not isinstance(automation, list) or not all(
+                        isinstance(a, dict) and set(a) == {"tick", "param", "value"} for a in automation):
+                    raise GenerateError(f"automation for {name} must be a list of {{tick, param, value}}")
                 files[name] = enc.encode_events(item["bars"], [(e["pad"], e["tick"],
-                                                                e.get("duration", enc.STEP_DURATION))
-                                                               for e in events])
+                                                                e.get("duration", enc.STEP_DURATION),
+                                                                e.get("note", enc.NOTE))
+                                                               for e in events],
+                                                [(a["tick"], a["param"], a["value"]) for a in automation])
                 continue
             _require_fields(item, PATTERN_FIELDS, "patterns")
             name = enc.pattern_member(item["group"], item["index"])
@@ -187,10 +194,15 @@ def generate_ppak(template: bytes, project: int, out: str | Path, meta: dict, *,
             events = enc.pattern_events(written[name])
             off = [min(e["tick"] % enc.TICKS_PER_STEP, enc.TICKS_PER_STEP - e["tick"] % enc.TICKS_PER_STEP)
                    for e in events]
+            automation = enc.pattern_automation(written[name])
             decoded[name] = {"events": len(events),
                              "off_grid_ticks": {"mean": round(sum(off) / len(off), 1), "max": max(off)}
                              if off else None,
-                             "steps": enc.pattern_steps(written[name], strict=False)}
+                             "steps": enc.pattern_steps(written[name], strict=False),
+                             "notes": sorted({e["note"] for e in events}),
+                             "automation": len(automation)}
+            if automation:
+                decoded[name]["automation_params"] = sorted({a["param"] for a in automation})
         else:
             decoded[name] = {str(pad): row for pad, row in enc.pattern_steps(written[name]).items()}
     return {

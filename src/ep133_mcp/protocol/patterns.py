@@ -25,6 +25,10 @@ VELOCITY_BYTE = 100
 STEP_DURATION = TICKS_PER_STEP
 MAX_DURATION = 0xFFFF
 EVENT_TYPE_NOTE = 0
+EVENT_TYPE_PARAM = 1
+MAX_NOTE = 127
+MAX_PARAM = 255
+MAX_AUTOMATION_VALUE = 0x7FFF     # 15-bit: 0..32759 observed
 SCENES_HEAD = 7
 SCENE_CHUNK = 6
 SCENE_SLOTS = 99
@@ -63,32 +67,51 @@ def encode_pattern(bars: int, steps: dict[int, str]) -> bytes:
     return bytes(out)
 
 
-def encode_events(bars: int, events: list[tuple[int, int, int]]) -> bytes:
-    """4-byte header plus one note event per (pad, tick, duration), sorted by tick.
+def encode_events(bars: int, events: list[tuple], automation: list[tuple[int, int, int]] = ()) -> bytes:
+    """4-byte header plus one note event per (pad, tick, duration[, note]) and one parameter event
+    per (tick, param, value), sorted by tick with notes before automation at the same tick.
 
     The device stores TICKS_PER_STEP ticks per 16th and its own recordings use all of them: a
     hand-played bar on this hardware sat a mean of 4 ticks (21 ms) off the 16ths, with 3 of 77
     events exactly on a step. Snapping a transcription to steps throws that away, so this is the
-    encoder transcription uses; encode_pattern stays for patterns written as step strings."""
+    encoder transcription uses; encode_pattern stays for patterns written as step strings.
+
+    note defaults to 60, the value in 2315 of 3612 device events; other values (21..72 seen) sit on
+    pads that carry pitched runs, and which pitch the device plays for them is unverified. A
+    parameter event is `pos | 0x01 | param | 0x00 | value u16 | 0`, the shape of the 66 recorded
+    fader moves in the 2026-09-09 backup (ids 1, 5, 6; values 0..32759); the ids' meanings are
+    unmapped, so the caller names a number and the device decides."""
     if type(bars) is not int or not 1 <= bars <= MAX_BARS:
         raise ValueError(f"bars must be 1..{MAX_BARS}")
     limit = bars * STEPS_PER_BAR * TICKS_PER_STEP
-    placed: list[tuple[int, int, int]] = []
+    placed: list[tuple[int, int, bytes]] = []
     for item in events:
-        pad, tick, duration = item
+        pad, tick, duration = item[:3]
+        note = item[3] if len(item) > 3 else NOTE
         if type(pad) is not int or not 1 <= pad <= 12:
             raise ValueError(f"pad must be 1..12: {pad!r}")
         if type(tick) is not int or not 0 <= tick < limit:
             raise ValueError(f"tick must be 0..{limit - 1} for a {bars}-bar pattern: {tick!r}")
         if type(duration) is not int or not 1 <= duration <= MAX_DURATION:
             raise ValueError(f"duration must be 1..{MAX_DURATION} ticks: {duration!r}")
-        placed.append((tick, pad, duration))
+        if type(note) is not int or not 0 <= note <= MAX_NOTE:
+            raise ValueError(f"note must be 0..{MAX_NOTE}: {note!r}")
+        placed.append((tick, EVENT_TYPE_NOTE, struct.pack("<HBBBHB", tick, (pad - 1) << 3 | EVENT_TYPE_NOTE, note,
+                                                          VELOCITY_BYTE, duration, 0)))
+    for tick, param, value in automation:
+        if type(tick) is not int or not 0 <= tick < limit:
+            raise ValueError(f"automation tick must be 0..{limit - 1} for a {bars}-bar pattern: {tick!r}")
+        if type(param) is not int or not 0 <= param <= MAX_PARAM:
+            raise ValueError(f"automation param must be 0..{MAX_PARAM}: {param!r}")
+        if type(value) is not int or not 0 <= value <= MAX_AUTOMATION_VALUE:
+            raise ValueError(f"automation value must be 0..{MAX_AUTOMATION_VALUE}: {value!r}")
+        placed.append((tick, EVENT_TYPE_PARAM, struct.pack("<HBBBHB", tick, EVENT_TYPE_PARAM, param, 0, value, 0)))
     if len(placed) > MAX_EVENTS:
         raise ValueError(f"pattern has {len(placed)} events; the header holds at most {MAX_EVENTS}")
-    placed.sort()
+    placed.sort(key=lambda item: item[:2])
     out = bytearray([0, bars, len(placed), 0])
-    for tick, pad, duration in placed:
-        out += struct.pack("<HBBBHB", tick, (pad - 1) << 3 | EVENT_TYPE_NOTE, NOTE, VELOCITY_BYTE, duration, 0)
+    for _, _, raw in placed:
+        out += raw
     return bytes(out)
 
 
@@ -120,7 +143,7 @@ def pattern_steps(data: bytes, strict: bool = True) -> dict[int, str]:
     rows = {}
     for e in decoded["events"]:
         if e["type"] != EVENT_TYPE_NOTE:
-            raise ValueError("pattern holds parameter events")
+            continue                      # fader automation has no step; pattern_automation lists it
         if strict and (e["pos"] % TICKS_PER_STEP or e["pos"] >= length * TICKS_PER_STEP):
             raise ValueError(f"event at tick {e['pos']} is off the 16th grid")
         row = rows.setdefault(e["pad"], [REST] * length)
@@ -129,9 +152,15 @@ def pattern_steps(data: bytes, strict: bool = True) -> dict[int, str]:
 
 
 def pattern_events(data: bytes) -> list[dict]:
-    """Note events as {pad, tick, duration}, keeping the tick the device stored."""
-    return [{"pad": e["pad"], "tick": e["pos"], "duration": e["duration"]}
+    """Note events as {pad, tick, duration, note}, keeping the tick the device stored."""
+    return [{"pad": e["pad"], "tick": e["pos"], "duration": e["duration"], "note": e["note"]}
             for e in decode_pattern(data)["events"] if e["type"] == EVENT_TYPE_NOTE]
+
+
+def pattern_automation(data: bytes) -> list[dict]:
+    """Parameter events as {tick, param, value}; for a type-1 event byte 3 is the id and 5-6 the value."""
+    return [{"tick": e["pos"], "param": e["note"], "value": e["duration"]}
+            for e in decode_pattern(data)["events"] if e["type"] == EVENT_TYPE_PARAM]
 
 
 def scene_chunk_offset(scene: int) -> int:

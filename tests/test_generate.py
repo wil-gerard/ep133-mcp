@@ -238,9 +238,9 @@ def test_events_form_places_ticks_and_durations(tmp_path):
             {"pad": 2, "tick": 3, "duration": 46},
             {"pad": 3, "tick": 27, "duration": 94}]}])
     written = P.unpack_project(P.read_pak(out.read_bytes())[1][3])["patterns/d02"]
-    assert enc.pattern_events(written) == [{"pad": 1, "tick": 0, "duration": 18},
-                                           {"pad": 2, "tick": 3, "duration": 46},
-                                           {"pad": 3, "tick": 27, "duration": 94}]
+    assert enc.pattern_events(written) == [{"pad": 1, "tick": 0, "duration": 18, "note": 60},
+                                           {"pad": 2, "tick": 3, "duration": 46, "note": 60},
+                                           {"pad": 3, "tick": 27, "duration": 94, "note": 60}]
     reported = result["patterns_written"]["patterns/d02"]
     assert reported["events"] == 3 and reported["off_grid_ticks"]["max"] == 3
     assert reported["steps"] == {1: "x...............", 2: "x...............", 3: ".x.............."}
@@ -248,3 +248,60 @@ def test_events_form_places_ticks_and_durations(tmp_path):
         with pytest.raises(G.GenerateError):
             G.generate_ppak(tar, 3, tmp_path / f"bad{id(bad)}.ppak", meta,
                             patterns=[{"group": "D", "index": 2, "bars": 1, "events": [bad]}])
+
+
+def test_events_form_note_and_automation(tmp_path):
+    """A pitched run and a fader sweep: note per event, parameter events per pattern, both preserved
+    in the file and told apart on the way back out."""
+    import zipfile
+
+    files = minimal_project()
+    source = tmp_path / "src.pak"
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr("/meta.json", json.dumps({"pak_type": "user", "device_version": "2.5.1"}))
+        z.writestr("/projects/P03.tar", P.pack_project(files))
+    tar, meta, sounds = G.template_from_pak(source, 3)
+    out = tmp_path / "x.ppak"
+    result = G.generate_ppak(tar, 3, out, meta, patterns=[
+        {"group": "C", "index": 1, "bars": 1, "events": [
+            {"pad": 4, "tick": 0, "duration": 90, "note": 60},
+            {"pad": 4, "tick": 96, "duration": 90, "note": 67},
+            {"pad": 4, "tick": 192, "duration": 90, "note": 72}],
+         "automation": [{"tick": 0, "param": 5, "value": 12898}, {"tick": 96, "param": 5, "value": 0},
+                        {"tick": 6, "param": 5, "value": 8146}]}])
+    written = P.unpack_project(P.read_pak(out.read_bytes())[1][3])["patterns/c01"]
+    assert written[:4] == bytes([0, 1, 6, 0])
+    assert enc.pattern_events(written) == [{"pad": 4, "tick": 0, "duration": 90, "note": 60},
+                                           {"pad": 4, "tick": 96, "duration": 90, "note": 67},
+                                           {"pad": 4, "tick": 192, "duration": 90, "note": 72}]
+    assert enc.pattern_automation(written) == [{"tick": 0, "param": 5, "value": 12898},
+                                               {"tick": 6, "param": 5, "value": 8146},
+                                               {"tick": 96, "param": 5, "value": 0}]
+    # note first, then the parameter event at the same tick; the parameter event has the documented shape
+    assert written[4:12] == struct.pack("<HBBBHB", 0, (4 - 1) << 3, 60, 100, 90, 0)
+    assert written[12:20] == bytes.fromhex("0000") + bytes([1, 5, 0]) + (12898).to_bytes(2, "little") + b"\0"
+    reported = result["patterns_written"]["patterns/c01"]
+    assert reported["notes"] == [60, 67, 72] and reported["automation"] == 3 and reported["automation_params"] == [5]
+    assert reported["steps"] == {4: "x...x...x......."}
+    for bad in ({"events": [{"pad": 1, "tick": 0, "note": 128}]},
+                {"events": [{"pad": 1, "tick": 0, "note": "C4"}]},
+                {"events": [{"pad": 1, "tick": 0}], "automation": [{"tick": 0, "param": 1}]},
+                {"events": [{"pad": 1, "tick": 0}], "automation": [{"tick": 384, "param": 1, "value": 0}]},
+                {"events": [{"pad": 1, "tick": 0}], "automation": [{"tick": 0, "param": 1, "value": 32768}]},
+                {"events": [{"pad": 1, "tick": 0}], "automation": [{"tick": 0, "param": 256, "value": 0}]},
+                {"events": [{"pad": 1, "tick": 0}], "automation": {"tick": 0}}):
+        with pytest.raises(G.GenerateError):
+            G.generate_ppak(tar, 3, tmp_path / f"bad{id(bad)}.ppak", meta,
+                            patterns=[{"group": "C", "index": 1, "bars": 1, **bad}])
+
+
+def test_device_automation_round_trips_through_the_encoder():
+    """The five device patterns with fader moves re-encode byte for byte modulo byte 7 - the same
+    standard the note encoder met - so emitting automation is not a new byte layout."""
+    raw = bytes([0, 1, 3, 0]) + struct.pack("<HBBBHB", 0, (2 - 1) << 3, 60, 100, 24, 6) \
+        + struct.pack("<HBBBHB", 0, 1, 6, 0, 12898, 97) + struct.pack("<HBBBHB", 6, 1, 6, 0, 10147, 0)
+    notes = [(e["pad"], e["tick"], e["duration"], e["note"]) for e in enc.pattern_events(raw)]
+    auto = [(a["tick"], a["param"], a["value"]) for a in enc.pattern_automation(raw)]
+    again = enc.encode_events(1, notes, auto)
+    assert len(again) == len(raw)
+    assert all(a == b for i, (a, b) in enumerate(zip(again, raw)) if (i - 4) % 8 != 7)
