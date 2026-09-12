@@ -87,6 +87,10 @@ SOUND_FIELDS = {
     "sound.amplitude": _int(0, 200),        # 200 observed on P03 A01/A02 (docs/research/pad-metadata.md)
     "sound.pan": _int(-16, 16),
     "time.mode": _enum(TIME_MODES),
+}
+# Written to a pad record on OS 2.5.1 the device drops these three and leaves the slot alone
+# (docs/research/pad-params-proof.md), so they are slot-only here.
+SLOT_ONLY_FIELDS = {
     "sound.bpm": _number(1.0, 200.0),       # 240 is rejected upstream; bars clamp to powers of two
     "sound.bars": _number(0.0625, 64.0),
     "sound.rootnote": _int(0, 127),
@@ -97,7 +101,7 @@ PAD_FIELDS = SOUND_FIELDS | {
     "sound.mutegroup": _bool,
     "midi.channel": _int(0, 15),
 }
-SLOT_FIELDS = SOUND_FIELDS | {
+SLOT_FIELDS = SOUND_FIELDS | SLOT_ONLY_FIELDS | {
     "name": _name,
     "sound.loopstart": _int(-1, 2**31 - 1),   # trim-only on this device: never an auto-loop
     "sound.loopend": _int(-1, 2**31 - 1),
@@ -112,6 +116,10 @@ def validate_params(params, allowed: dict, what: str) -> dict:
     out = {}
     for key, value in params.items():
         if key not in allowed:
+            if key in SLOT_ONLY_FIELDS:
+                raise InvalidDestination(f"{key} lives on the slot, not the pad", observed=key,
+                                         expected=sorted(allowed),
+                                         next_step="Write it with set_slot; a pad SET drops it.")
             raise InvalidDestination(f"Unknown or read-only field for {what}", observed=key,
                                      expected=sorted(allowed), next_step="Remove the field.")
         try:

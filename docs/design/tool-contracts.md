@@ -181,10 +181,12 @@ As under Restore.
 
 ### `set_pad(project, group, pad, params, backup_id, confirm=None)`
 Per-pad sound parameters through the same `FILE_METADATA_SET` that assigns a
-pad. `params` is any subset of the 14 fields upstream lists as honoured
-(`sample.start/end`, `sound.playmode`, `envelope.attack/release`,
-`sound.pitch/amplitude/pan/mutegroup`, `time.mode`, `sound.bpm/bars/rootnote`,
-`midi.channel`); anything else, including `sym`, is refused before I/O.
+pad. `params` is any subset of the 11 fields the pad record takes on this
+OS (`sample.start/end`, `sound.playmode`, `envelope.attack/release`,
+`sound.pitch/amplitude/pan/mutegroup`, `time.mode`, `midi.channel`);
+`sound.bpm/bars/rootnote` are slot-only (a pad SET drops them —
+`docs/research/pad-params-proof.md`) and are refused with a pointer to
+`set_slot`; anything else, including `sym`, is refused before I/O.
 Preflight: destination valid → values in range and enums strings → backup
 current → pad read (`read_pad`) → `sym` non-zero → trim within the slot's
 `sample.end`. Then `needs_confirmation` carrying `before` (the current value

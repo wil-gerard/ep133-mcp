@@ -92,11 +92,17 @@ def test_validate_params_rules():
     for bad in ({}, None, {"sym": 5}, {"sound.playmode": 1}, {"sound.playmode": "loop"}, {"envelope.attack": 256},
                 {"sound.pitch": 13}, {"sound.pitch": True}, {"sound.pan": -17}, {"sound.amplitude": 201}, {"sound.mutegroup": 1},
                 {"midi.channel": 16}, {"sample.start": 100, "sample.end": 100}, {"sample.end": 0},
-                {"sound.bpm": 240}, {"time.mode": "BPM"}):
+                {"sound.bpm": 88}, {"sound.bars": 2}, {"sound.rootnote": 48},   # slot-only on this OS
+                {"time.mode": "BPM"}):
         with pytest.raises(InvalidDestination):
             validate_params(bad, PAD_FIELDS, "x")
     assert validate_params({"name": "kick 2", "sound.loopend": -1}, SLOT_FIELDS, "x") == {"name": "kick 2", "sound.loopend": -1}
-    for bad in ({"name": ""}, {"name": "x" * 21}, {"name": "é"}, {"sample.start": 0}, {"midi.channel": 1}):
+    assert validate_params({"sound.bpm": 88, "sound.bars": 2, "sound.rootnote": 48}, SLOT_FIELDS, "x") == \
+        {"sound.bpm": 88.0, "sound.bars": 2.0, "sound.rootnote": 48}
+    with pytest.raises(InvalidDestination, match="lives on the slot"):
+        validate_params({"sound.rootnote": 48}, PAD_FIELDS, "x")
+    for bad in ({"name": ""}, {"name": "x" * 21}, {"name": "é"}, {"sample.start": 0}, {"midi.channel": 1},
+                {"sound.bpm": 240}):
         with pytest.raises(InvalidDestination):
             validate_params(bad, SLOT_FIELDS, "x")
 
@@ -125,12 +131,12 @@ def test_set_pad_confirms_then_writes_only_requested_fields(setup):
 
 def test_set_pad_reports_clamped_dropped_and_coupled(setup):
     d, writer = setup
-    d.clamp["sound.bars"] = 4.0
+    d.clamp["sound.pan"] = 16
     d.drop.add("midi.channel")
     d.couple["sound.playmode"] = {"envelope.release": 255}
-    out = approve(writer, d, "set_pad", 1, "A", 7, {"sound.bars": 3, "midi.channel": 4, "sound.playmode": "key"})
+    out = approve(writer, d, "set_pad", 1, "A", 7, {"sound.pan": 12, "midi.channel": 4, "sound.playmode": "key"})
     assert out["status"] == "written_with_differences"
-    assert out["changed"] == {"sound.bars": {"requested": 3.0, "stored": 4.0},
+    assert out["changed"] == {"sound.pan": {"requested": 12, "stored": 16},
                               "envelope.release": {"requested": 15, "stored": 255}}
     assert out["dropped"] == ["midi.channel"]
     assert out["applied"] == {"sound.playmode": "key"}
