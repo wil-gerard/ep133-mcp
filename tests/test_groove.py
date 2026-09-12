@@ -187,7 +187,7 @@ def test_tick_pattern_keeps_micro_timing(fixture):
     record = groove.transcribe_groove(fixture['clip'], downbeat_s=0.0, **FALLBACK)
     tick = record['tick_pattern']
     assert set(tick) == {'group', 'index', 'bars', 'events'} and tick['bars'] == record['bars']
-    assert len(tick['events']) == record['quantization']['placed']
+    assert len(tick['events']) == sum(p['hits'] for p in record['pads']) <= record['quantization']['placed']
     limit = tick['bars'] * groove.STEPS_PER_BAR * enc.TICKS_PER_STEP
     assert all(0 <= e['tick'] < limit and e['duration'] >= 1 for e in tick['events'])
     # Byte 4 is velocity (docs/research/velocity-proof.md): each hit carries its onset strength as

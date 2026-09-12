@@ -10,8 +10,10 @@ band is the kick's body, not a snare, and is dropped (LOW_DOMINANCE). perc
 pads are variants the owner places by hand; bass and melodic pads are not
 transcribed.
 
-The kit is only read for the class -> pad numbers, so a kit extracted from a
-different section of the same track is fine.
+The kit is only read for the pad numbers and slice files, so a kit extracted
+from a different section of the same track is fine. Each band goes to the pad
+whose slice sounds like it (pad_roles), not to the pad extract_kit named for
+it; the result reports both `class` and `role` per pad.
 
 Grid: 16 steps per bar of 24 ticks, anchored on the tracked beats. Each
 onset's position is interpolated between the two beats around it (mean
@@ -23,7 +25,10 @@ the only bar the device's 384-tick pattern holds.
 
 Bars = clip length / bar length, rounded to 1, 2 or 4 on a log scale unless
 given. Onsets past the last bar, or before the downbeat, fold modulo the
-pattern; an onset
+pattern, and a cell is kept only when at least half of the folds covering it
+fire there, so the pattern is the loop and not the union of every fill (a
+30 s clip folded to 4 bars has 4 folds; 254 hits became 77 that way, the
+owner's own count); an onset
 within MIN_INTERVAL_STEPS of the previous accepted onset is the same hit
 (a 16th grid cannot hold two, and separation double-triggers land there).
 The quantization error is the mean and maximum |onset - grid| in ms over
@@ -43,7 +48,7 @@ from typing import Any
 from .analysis import analyze_reference
 from .errors import InvalidReference
 from ..protocol.patterns import MAX_DURATION as enc_max_duration, MAX_VELOCITY
-from .kit import DRUM_CLASSES, drum_features, kit_paths
+from .kit import DRUM_CLASSES, LOW_BAND_HZ, drum_features, kit_paths
 
 STEPS_PER_BEAT = 4
 BEATS_PER_BAR = 4
@@ -84,6 +89,35 @@ def slice_ms(pads: list[dict], cls: str) -> float:
     return 0.0
 
 
+def pad_roles(pads: list[dict]) -> dict[int, str]:
+    """Which drum pad plays which band, from the slice as it sounds, not from its class name.
+
+    extract_kit names a slice by the first FEATURE_WINDOW_S of its onset; the slice it writes runs
+    to the next onset and can be owned by a different drum for most of its length. Measured on
+    the kit the owner played over (fixtures/p03-hand-played-2026-09-12.json): the 'kick' slice is
+    a 50 ms thump under a 200 ms hat tail and the 'snare' slice is a crack over a 250 ms kick body,
+    and the owner used them as hat and kick. The whole slice is what plays, so the pad with the
+    most low-band energy over the whole slice takes the kick stream, the brightest of the rest
+    the hat stream, the last the snare stream."""
+    import numpy as np
+    import soundfile as sf
+
+    measured = []
+    for pad in pads:
+        audio, sr = sf.read(pad["path"], dtype="float32")
+        mono = audio.mean(axis=1) if audio.ndim > 1 else audio
+        power = np.square(np.abs(np.fft.rfft(mono * np.hanning(len(mono)))))
+        freqs = np.fft.rfftfreq(len(mono), 1 / sr)
+        total = float(power.sum()) + 1e-12
+        measured.append((pad["pad"], float(power[freqs < LOW_BAND_HZ].sum() / total), float((freqs * power).sum() / total)))
+    roles: dict[int, str] = {}
+    for role, key in (("kick", lambda m: m[1]), ("hat", lambda m: m[2]), ("snare", lambda m: -m[2])):
+        left = [m for m in measured if m[0] not in roles]
+        if left:
+            roles[max(left, key=key)[0]] = role
+    return roles
+
+
 def groove_path(clip: str | Path) -> Path:
     return kit_paths(clip)[0] / "groove.json"
 
@@ -103,6 +137,11 @@ def load_kit(clip: str | Path, kit: str | Path | None) -> dict:
         raise InvalidReference("Kit has no kick, snare or hat pad", observed=[s["class"] for s in slices],
                                next_step="Re-run extract_kit with kick, snare or hat in want.")
     return record
+
+
+def folds_covering(bar: int, bars: int, clip_bars: float) -> int:
+    """How many times the clip passes over bar `bar` of a `bars`-bar pattern; at least once."""
+    return max(1, math.ceil((clip_bars - bar) / bars))
 
 
 def choose_bars(clip_bars: float) -> int:
@@ -244,7 +283,10 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     analysis = analyze_reference(clip, separation, beat_tracker)
     kit_record = load_kit(clip, kit)
     pads = [s for s in kit_record["slices"] if s["class"] in DRUM_CLASSES]
-    pad_of = {p["class"]: p["pad"] for p in pads}
+    # "classify" matches each onset to a pad's own exemplar, so its class is that pad. "bands"
+    # hears the kick, snare and hat of the music, which go to the pads that sound like them.
+    roles = pad_roles(pads) if detector == "bands" else {p["pad"]: p["class"] for p in pads}
+    pad_of = {roles[p["pad"]]: p["pad"] for p in pads}
     drums = analysis["stems"].get("drums")
     if not drums or not drums["onsets_s"]:
         raise InvalidReference("No drum onsets to transcribe", observed=drums and drums.get("level_dbfs"),
@@ -296,9 +338,11 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     last_step: dict[str, float] = {}
     placements = sorted(((t, cls, strength) for cls in pad_of for t, strength in detected.get(cls, ())),
                         key=lambda item: item[0])
-    # "bands" scales strength to each band's own peak, "classify" to the whole stem's; velocity
-    # is relative to the loudest hit of the class either way.
-    peak = {cls: max((s for _, c, s in placements if c == cls), default=1.0) or 1.0 for cls in pad_of}
+    # A clip longer than the pattern folds onto it. The union of every fold would keep each fill
+    # and variation from every bar of the clip; the pattern keeps a cell only when at least
+    # half of the folds that cover it fire there (the loop, not the fills), at the median tick
+    # offset and strength of those hits.
+    cells: dict[tuple[str, int], list[tuple[float, float]]] = {}
     for t, cls, strength in placements:
         # min_strength thins the transcription; the hits that stay keep their level below.
         if strength < min_strength:
@@ -315,12 +359,26 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
             before += 1
         if not 0 <= nearest < total_steps:
             folded += 1
-        rows[cls][nearest % total_steps] = "x"
-        tick = int(round(steps * TICKS_PER_STEP)) % (total_steps * TICKS_PER_STEP)
-        events.append({"pad": pad_of[cls], "tick": tick, "duration": durations[cls],
-                       "velocity": velocity_for(strength / peak[cls])})
-        hits[cls] += 1
+        cells.setdefault((cls, nearest % total_steps), []).append((steps - nearest, strength))
         errors.append(abs(error) * 1000)
+    minority = 0
+    kept: list[tuple[int, str, float, float]] = []
+    for (cls, cell), found in cells.items():
+        if len(found) * 2 < folds_covering(cell // STEPS_PER_BAR, bars, clip_bars):
+            minority += 1
+            continue
+        offsets = sorted(offset for offset, _ in found)
+        levels = sorted(level for _, level in found)
+        kept.append((cell, cls, offsets[len(offsets) // 2], levels[len(levels) // 2]))
+    # "bands" scales strength to each band's own peak, "classify" to the whole stem's; velocity
+    # is relative to the loudest cell of the class either way.
+    peak = {cls: max((level for _, c, _, level in kept if c == cls), default=1.0) or 1.0 for cls in pad_of}
+    for cell, cls, offset, level in sorted(kept):
+        rows[cls][cell] = "x"
+        tick = int(round((cell + offset) * TICKS_PER_STEP)) % (total_steps * TICKS_PER_STEP)
+        events.append({"pad": pad_of[cls], "tick": tick, "duration": durations[cls],
+                       "velocity": velocity_for(level / peak[cls])})
+        hits[cls] += 1
 
     pattern = {"group": group, "index": index, "bars": bars,
                "steps": {str(pad_of[cls]): "".join(row) for cls, row in rows.items()}}
@@ -330,7 +388,8 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
     record: dict[str, Any] = {
         "clip": analysis["clip"], "kit": kit_record["kit"], "pattern": pattern,
         "tick_pattern": tick_pattern,
-        "pads": [{"pad": pad_of[cls], "class": cls, "hits": hits[cls]} for cls in pad_of],
+        "pads": [{"pad": p["pad"], "class": p["class"], "role": roles[p["pad"]], "hits": hits[roles[p["pad"]]]}
+                 for p in pads],
         "bpm": bpm, "downbeat_s": round(origin_s, 4), "bars": bars, "clip_bars": round(clip_bars, 2),
         "steps_per_bar": STEPS_PER_BAR, "ticks_per_step": TICKS_PER_STEP,
         "grid": grid.mode, "beats_per_bar_hint": analysis["downbeat"]["beats_per_bar"],
@@ -338,7 +397,8 @@ def transcribe_groove(clip: str | Path, kit: str | Path | None = None, bars: int
                          "max_ms": round(max(errors), 1) if errors else None,
                          "onsets": detected_total, "detector": detector, "placed": len(errors), "folded": folded,
                          "below_min_strength": weak,
-                         "dropped_retriggers": dropped, "before_downbeat": before},
+                         "dropped_retriggers": dropped, "before_downbeat": before,
+                         "folds": math.ceil(max(clip_bars, 1.0) / bars), "minority_cells": minority},
         "beat_tracker": analysis["beat_tracker"], "separation": analysis["separation"], "probable": True,
     }
     path = groove_path(clip)
