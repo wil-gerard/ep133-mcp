@@ -423,12 +423,10 @@ def create_backup(out: str, base: str | None = None) -> dict[str, Any]:
         "of the nine projects stores, because a stored slot that no longer exists reads as an "
         "empty pad and cannot be told from one - clear those pads first. Requires a verified "
         "current backup_id and returns needs_confirmation with each slot's name, frames and "
-        "CRC; show that to the owner and repeat with confirm. KNOWN NOT TO WORK ON OS 2.5.1: "
-        "the device answers FILE_DELETE with status 1 'failed to delete' for a Sample Tool slot "
-        "and for an MCP-uploaded, unreferenced slot alike (docs/research/delete-proof.md), so on "
-        "that OS this tool frees nothing and Sample Tool remains the way to delete. Each slot is "
-        "still re-read after its delete and reported as deleted or not_deleted - never assumed. "
-        "Not a transaction: read every entry."
+        "CRC; show that to the owner and repeat with confirm. Sends the frame Sample Tool sends; "
+        "a one-slot delete is proven on OS 2.5.1 by a backup diff (docs/research/delete-proof.md). "
+        "Each slot is still re-read after its delete and reported as deleted or not_deleted - "
+        "never assumed. Not a transaction: read every entry."
     ),
 )
 def delete_samples(slots: list[int], backup_id: str, confirm: str | None = None) -> dict[str, Any]:

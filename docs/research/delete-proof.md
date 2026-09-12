@@ -78,3 +78,38 @@ nothing changed". Untried and parked: FILE_DELETE after a read-mode
 each is a speculative write and upstream's wedge history (§11) says not
 to send unknown write-side frames without a reason. The 46-slot bulk
 delete stays with Sample Tool.
+
+## Fourth attempt (2026-09-12, right frame) — DELETED
+
+The refusals were ours. ep133-krate's `captures/sniffer-delete-hi.bin`
+(Sample Tool deleting slot 467 on OS 2.0.5), decoded with our own
+`packing.unpack`, shows the delete as packed `04 06 01 53` → payload
+**`06 01 D3`**: opcode, u16 BE id, **no `02` byte**, sent straight after
+GREET with no `FILE_INIT`, answered status 0, then a burst of unsolicited
+`03 03 E8 {"free_space_in_bytes": …}` notifications as the audio is
+released. Upstream PROTOCOL.md's `06 02 <fid>` (marked ❌ there) put the
+id at the wrong offset: 704 was read as 0x0202 = 514 and 30 as 0x0200 =
+512 — no such slots, hence `failed to delete` both times.
+
+`6acbc4b`: `file_delete` is `06 <id>`, `delete_slot` mirrors the capture
+(GREET → delete, no write init), the bytes are pinned to the capture in
+`tests/test_protocol.py`.
+
+`delete_samples([30], session-13.pak)` → **`deleted`**, journal
+`e15b92b6…`. Library 58 → 57, free bytes 26 409 768 → 26 921 268
+(+511 500), slot re-read absent. `verify_backup(session-13)` → `stale`,
+the only difference `library_slots only_in_backup [30]`; all 432 pad
+records unchanged. `session-14.pak` (`7220aa30…`, base session-13, 57
+slots reused) written; `tools/diff_backups.py session-13 session-14`:
+slots 58 → 57, removed [30], one pad record differing — P01 A02 byte 16
+`0x64` → `0x96`, which is the `sound.amplitude` 100 → 150 write from
+earlier in the day (session-13 predates it), and incidentally places
+`sound.amplitude` at offset 16 of the 27-byte pad record.
+
+The one-slot delete is proven by a backup diff. The unsolicited
+free-space frames carry no request id and our reader discards them; the
+next command after the delete (the re-read) was answered normally. The
+46-slot bulk delete is unblocked and waits on the owner's yes.
+
+Lesson: an upstream table row marked ❌ is an inference, not a capture.
+Check krate's captures before concluding a command is unusable.
