@@ -13,6 +13,13 @@ Audited 2026-09-07 (America/Chicago). Scope: source inspection of six pinned rep
 | [DannyDesert/EP133-skill](https://github.com/DannyDesert/EP133-skill/tree/2e6458ef7cc0a8458c5e7b081b877df48c408b88) | `2e6458ef7cc0a8458c5e7b081b877df48c408b88` | MIT, root LICENSE | Genre examples and archive builder; binary/event/settings assumptions disagree with newer sources. |
 | [benjaminr/mcp-koii](https://github.com/benjaminr/mcp-koii/tree/652793d684be8b9c30698ebf8857c032b6bb427d) | `652793d684be8b9c30698ebf8857c032b6bb427d` | README/setup claim MIT; referenced LICENSE file absent | Live MIDI and readable pattern syntax; default sound/pad configuration is not device inventory. |
 
+### Sources found since (2026-09-12)
+
+| Source | License | Useful component / limit |
+|---|---|---|
+| **EP Sample Tool itself** — `https://teenage.engineering/apps/ep-sample-tool`, bundle `assets/index-C1wBjhTa.js` (1.8 MB, identifiers intact) | TE's, not open source; read for interoperability only, nothing copied | The sender's own code for every command: `uploadProjectArchive` (project write, [project-write.md](project-write.md)), `setActiveProject` (`{active: node}` on 2000), `SysExFile*Request` byte layouts, `TE_SYSEX_FILE_INIT_SUBSCRIBE`. The ground truth when upstream tables say ❌. |
+| [seajaysec/ep-unity](https://github.com/seajaysec/ep-unity) | none stated | Browser/WebMIDI: EP-133 ↔ EP-40 SKU-header rewrite (cross-flash), WebMIDI DFU, project + sample backup/restore; Python firmware-analysis scripts. Its own README: "Unsupported, and it can brick your device." Firmware is a non-goal here; useful only as a second reading of the backup/restore frames. |
+
 ## Evidence matrix for the A1 proof
 
 Status meanings: **source + capture** means inspected upstream implementation and referenced capture evidence; **source** means code exists; **experiment required** means this device remains unverified. None means tested on our hardware.
