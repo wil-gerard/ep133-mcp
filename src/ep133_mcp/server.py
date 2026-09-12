@@ -30,6 +30,7 @@ from .protocol import decode as _decode
 from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
+from .safety.chop import Chopper
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
@@ -63,6 +64,7 @@ _journal = Journal(os.environ.get(
 _installer = Installer(_backups, _journal)
 _deleter = Deleter(_backups, _journal)
 _params = ParamWriter(_backups, _journal)
+_chopper = Chopper(_backups, _journal)
 
 
 def _device() -> DeviceSession:
@@ -337,6 +339,50 @@ def undo_last_pad_change() -> dict[str, Any]:
     try:
         with _operation_lock:
             return _params.undo(_device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="chop_sample",
+    description=(
+        "Upload one mono 16-bit 46875 Hz WAV to one library slot and put it on up to 12 pads of a "
+        "project/group, each trimmed (sample.start/end) to its own slice, so a chopped break costs "
+        "one slot. slices is {mode: 'equal', count: N} (N = number of pads), {mode: 'onsets'} (the "
+        "detector extract_kit uses; needs the audio extra; the first N backtracked onsets start "
+        "the slices and the detected times are returned so the owner can adjust), or explicit "
+        "[{start_s, end_s}] in time order without overlap. playmode (oneshot default, key for "
+        "gated chops, legato) is written to every pad with its paired release. Requires a verified "
+        "current backup_id; returns needs_confirmation with the full impact when any pad is "
+        "occupied. Not a transaction: upload is verified by CRC, then pads are assigned and "
+        "trimmed one at a time, each read back (stored record, then JSON) and reported as chopped, "
+        "chopped_with_differences (the device stored other values) or failed; stops at the first "
+        "failure. One journal covers everything so undo_last_chop is one step. Power-cycle "
+        "persistence is a separate check."
+    ),
+)
+def chop_sample(path: str, project: int, group: str, pads: list[int], slices: Any, backup_id: str,
+                confirm: str | None = None, playmode: str = "oneshot") -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _chopper.chop(path, project, group, pads, slices, backup_id, _device(), confirm, playmode)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="undo_last_chop",
+    description=(
+        "Revert the pads of the latest chop_sample journal: each pad that still stores the chop's "
+        "slot gets its prior sym and, where the record held them, its prior trim and playmode "
+        "written back, then its stored record is read to prove it. Reports anything it cannot "
+        "restore. The uploaded slot stays in the library; delete_samples removes it."
+    ),
+)
+def undo_last_chop() -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _chopper.undo(_device())
     except DeviceError as e:
         return _error(e)
 

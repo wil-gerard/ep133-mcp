@@ -206,6 +206,32 @@ Same flow on a library slot's record: `name`, `sound.loopstart/loopend`
 `time.mode` fields. The impact names the slot's `name` and `crc` so the
 owner recognises it; a slot's parameters reach every pad that plays it.
 
+### `chop_sample(path, project, group, pads, slices, backup_id, confirm=None, playmode="oneshot")`
+One upload, N pads. Slices are planned before any I/O — `{mode: equal,
+count}`, `{mode: onsets}` (extract_kit's detector, backtracked starts, the
+first N of them; needs the audio extra) or explicit `[{start_s, end_s}]` —
+and refused when empty, overlapping or out of order; ends clamp to the file.
+Preflight is `install_sample`'s for the slot (backup current, format, size,
+lowest slot absent from the library and from every stored record) and
+`install_kit`'s for the pads (each pad's prior stored record; occupied means
+destructive means token). The impact carries the slot, CRC, every pad's
+frame range and prior record, and the detected onset times.
+
+Write, sequentially and not as a transaction: snapshot check → upload → CRC
+and frame count read from the slot → per pad: stored record unchanged since
+preflight → `sym` assigned and the stored record read (`slot, frames`) →
+trim and playmode written in one metadata SET → JSON read back and compared
+(`applied` / `changed` / `dropped` / `side_effects`, judged against the
+record as it stood after the assignment). Stops at the first failure with
+every entry's status in the result. One journal (`chop_sample`).
+
+### `undo_last_chop()`
+Reverse order over the chop's pads: a pad whose stored slot is still the
+chop's gets `{sym: prior_slot}` plus whatever trim/playmode the record held
+before, then its stored record must equal the prior one. A pad that changed
+since, or whose prior slot no longer exists, is left alone and reported.
+The uploaded slot stays in the library.
+
 ### `undo_last_pad_change()`
 Writes the `before` values of the latest `set_pad`/`set_slot` journal back
 and reads the record. A key the record did not hold before the change cannot

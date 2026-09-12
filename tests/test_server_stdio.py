@@ -29,7 +29,7 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
+                     "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "chop_sample", "undo_last_chop", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
                      "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
 
 
@@ -190,6 +190,10 @@ module.main()
             bad = _payload(await session.call_tool('set_slot', {'slot': 1, 'params': {'sym': 2}, 'backup_id': 'x'}))
             assert bad['error'] == 'InvalidDestination'
             assert _payload(await session.call_tool('undo_last_pad_change'))['status'] == 'nothing_to_undo'
+            assert _payload(await session.call_tool('undo_last_chop'))['status'] == 'nothing_to_undo'
+            bad = _payload(await session.call_tool('chop_sample', {'path': str(wav), 'project': 1, 'group': 'A',
+                'pads': [1, 1], 'slices': {'mode': 'equal'}, 'backup_id': backup['backup_id']}))
+            assert bad['error'] == 'InvalidDestination'
             undo = _payload(await session.call_tool('undo_last_install'))
             assert undo['status'] == 'undone' and undo['library_slots_left_in_place'] == [1, 2]
             from ep133_mcp.protocol import projects as P
