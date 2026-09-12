@@ -30,7 +30,7 @@ async def test_handshake_lists_tools():
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
                      "read_pad", "read_project", "set_pad", "set_slot", "undo_last_pad_change", "chop_sample", "undo_last_chop", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
-                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
+                     "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak", "check_ppak"}
 
 
 @pytest.mark.asyncio
@@ -216,6 +216,10 @@ module.main()
             assert missing['error'] == 'InvalidInput'
             live_read = _payload(await session.call_tool('read_project', {'project': 1}))
             assert live_read['source'] == 'device' and live_read['bpm'] is None and live_read['patterns'] == []
+            checked = _payload(await session.call_tool('check_ppak', {'path': str(tmp_path / 'out.ppak'), 'project': 7}))
+            assert checked['status'] == 'ok' and checked['device']['active_project'] == 1
+            wrong = _payload(await session.call_tool('check_ppak', {'path': str(tmp_path / 'out.ppak'), 'project': 1}))
+            assert wrong['status'] == 'problems' and any('not P01' in p for p in wrong['problems'])
             live = _payload(await session.call_tool('generate_ppak', {
                 'out': str(tmp_path / 'live.ppak'), 'project': 1, 'bpm': 97.0}))
             assert live['error'] == 'InvalidInput' and 'flavour' in live['message']   # fake device writes ustar

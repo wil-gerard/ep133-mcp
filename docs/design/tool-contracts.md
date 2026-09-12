@@ -238,6 +238,22 @@ and reads the record. A key the record did not hold before the change cannot
 be unset over this interface and is listed as `not_restorable`. Separate from
 `undo_last_install`, which only reverts `sym`.
 
+### `check_ppak(path, project)` — read-only
+The preflight of the not-yet-possible `import_ppak`, shipped on its own
+because Sample Tool asks for a project number instead of reading it from
+the file and the P06 mis-import happened that way. Offline: the file is a
+`pak_type: project` export holding exactly `/projects/PNN.tar` for the
+requested N, the TAR is complete and in the device's own flavour, every
+`/sounds` entry is a readable WAV. Against the device: SKU matches, N is
+not the active project, every slot the pads reference exists on the device
+or is carried in the file (else it imports as a stale reference), no carried
+sound targets an occupied slot, and a summary of what project N holds now.
+`status` is `ok` or `problems`, each spelled out. The write path stays
+absent until Sample Tool's import is captured (Dex `0uxzjixo`); `import_ppak`
+will run this, then require a current backup and a token bound to
+`would_replace`, journal the previous TAR, write, read the TAR back
+byte-for-byte, and diff a fresh backup.
+
 ### Deliberately absent
 Firmware anything. Format. `FILE_DELETE` on arbitrary slots. Project switching
 (`active` only takes effect at boot; exposed as info, not action). Speculative

@@ -31,6 +31,7 @@ from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
 from .safety.chop import Chopper
+from .safety.import_project import check_ppak as _check_ppak
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
@@ -575,6 +576,27 @@ def generate_ppak(out: str, project: int, template_pak: str | None = None, bpm: 
         return {"error": "InvalidInput", "message": str(e)}
     except DeviceError as e:
         log.warning("generate_ppak failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="check_ppak",
+    description=(
+        "Preflight a .ppak for import into project N (1..9) before the owner runs Sample Tool - "
+        "or, once the SysEx write path is proven, before import_ppak. Read-only. Reports whether "
+        "the file is a single-project export in the device's own flavour and for that project "
+        "number (Sample Tool asks for the number and does not read it from the file), whether N is "
+        "the active project (never import there), the file's bpm, assigned pads, patterns and "
+        "scenes, which library slots its pads reference and whether each exists on the device or "
+        "is carried in the file, and what project N currently holds that an import would replace. "
+        "status is ok or problems with each problem spelled out."
+    ),
+)
+def check_ppak(path: str, project: int) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _check_ppak(path, project, _device())
+    except DeviceError as e:
         return _error(e)
 
 
