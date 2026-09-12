@@ -1,32 +1,42 @@
-"""check_ppak: the preflight an import_ppak tool will run, shipped ahead of the write path.
+"""check_ppak, the import preflight, and import_ppak, the write.
 
-Importing a project over SysEx is not possible yet: FILE_PUT_META / FILE_PUT_DATA are proven for
-samples, and whether they accept a project file id - and with what metadata - is unknown until
-Sample Tool's own import is captured (Dex 0uxzjixo). Until then every .ppak goes through Sample
-Tool by hand, and Sample Tool asks which project rather than reading it from the file: the P06
-mis-import in docs/handoff/session-2026-09-11-handoff.md is exactly the mistake this check exists
-to catch beforehand.
+The write path is what Sample Tool's own bundle does in `uploadProjectArchive` (read from the
+web app, not sniffed): FILE_PUT_META aimed at the project's node under /projects with the
+two-digit name, then FILE_PUT_DATA pages and an empty terminator - the sample upload proven in
+docs/research/upload-capture.md, retargeted (payloads.file_put_project, DeviceSession.write_project,
+docs/research/project-write.md). Sample Tool asks which project rather than reading it from the
+file: the P06 mis-import in docs/handoff/session-2026-09-11-handoff.md is exactly the mistake
+check_ppak exists to catch beforehand.
 
-So this is the read-only half: given a .ppak and the project number the owner intends, say
+check_ppak is the read-only half: given a .ppak and the project number the owner intends, say
 whether the file is a single-project export in the device's own flavour, whether it is for that
 project, whether that project is the active one (never import into it), which library slots its
 pads reference and whether each one exists on the device or is carried inside the file, and what
-the project currently holds that the import would replace. import_ppak, when the write path is
-proven, runs this first and refuses on any problem.
+the project currently holds that the import would replace. import_ppak runs it first and refuses
+on any problem, then writes, reads the project back and compares. The undo is the verified
+backup: undo_last_import writes that backup's copy of the project back.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 from pathlib import Path
 import re
+import secrets
 import tarfile
+import time
 import wave
 import zipfile
 
+from ..device import DeviceError
 from ..protocol import decode as D
 from ..protocol.projects import pack_project, project_entry, read_pak, stored_pads, unpack_project
-from .errors import InvalidDestination
+from .errors import InvalidDestination, VerificationFailed
+from .install import device_id
+
+CONFIRM_SECONDS = 300
 
 SOUND_NAME = re.compile(r"^/sounds/(\d+) (.*)\.wav$")
 MAX_PPAK_BYTES = 128 * 1024 * 1024
@@ -148,9 +158,124 @@ def check_ppak(path: str | Path, project: int, device) -> dict:
     except (ValueError, tarfile.TarError) as e:
         report["would_replace"] = {"unreadable": str(e)}
     report["status"] = "ok" if not report["problems"] else "problems"
-    report["instruction"] = (f"Import {Path(report['path']).name} with Sample Tool and choose project {project} when "
-                             "it asks; take a fresh backup first." if not report["problems"] else
-                             "Fix the problems before importing.")
-    report["write_path"] = ("not available: importing over SysEx is unproven (Dex tvyy03x6); "
-                            "this check is what import_ppak will run first")
+    report["instruction"] = (f"import_ppak writes {Path(report['path']).name} to project {project} over SysEx "
+                             "(or import it with Sample Tool and choose that project when it asks); take a "
+                             "fresh backup first." if not report["problems"] else "Fix the problems before importing.")
     return report
+
+
+def _project_summary(tar: bytes) -> dict:
+    """What a read-back is compared on when the bytes differ: everything decode_project sees."""
+    d = D.decode_project(tar)
+    return {"bpm": d["bpm"],
+            "pads": [(p["group"], p["pad"], p["stored_slot"], p["stored_length"]) for p in d["pads"]],
+            "patterns": [(p["group"], p["index"], p["bars"], p["events"], p["automation"]) for p in d["patterns"]],
+            "scenes": d["scenes"], "members": d["members"]}
+
+
+class Importer:
+    REVERTABLE = ("imported", "imported_with_differences", "write_attempted", "undo_attempted")
+
+    def __init__(self, backups, journal):
+        self.backups = backups
+        self.journal = journal
+        self._confirmations = {}
+
+    def import_ppak(self, path, project, backup_id, device, confirm=None):
+        report = check_ppak(path, project, device)
+        if report["problems"]:
+            raise InvalidDestination("check_ppak found problems; nothing written", observed=report["problems"],
+                                     next_step="Fix the file or pick another project, then retry.")
+        if report["included_sounds"]:
+            raise InvalidDestination("The file carries sounds; only the project TAR is written here",
+                                     observed=sorted(report["included_sounds"]),
+                                     next_step="Upload them with install_sample first, then import a "
+                                               "sound-free copy, or use Sample Tool for this file.")
+        live = self.backups.require_current(backup_id, device)
+        backup_path = self.backups.path_of(backup_id)
+        _, projects, _ = read_pak(Path(path).expanduser().read_bytes())
+        tar = projects[project]
+        impact = {"project": project, "path": report["path"], "tar_bytes": len(tar),
+                  "tar_sha256": hashlib.sha256(tar).hexdigest(),
+                  "contents": {k: (len(v) if isinstance(v, list) else v)
+                               for k, v in report["contents"].items() if k != "members"},
+                  "events": sum(p["events"] for p in report["contents"]["patterns"]),
+                  "would_replace": report["would_replace"], "referenced_slots": report["referenced_slots"]}
+        binding = hashlib.sha256(json.dumps({"backup_id": backup_id, "device_id": device_id(live),
+                                             "impact": impact}, sort_keys=True).encode()).hexdigest()
+        previous = self._confirmations.pop(confirm, None) if confirm else None
+        if previous is None or previous[0] != binding or previous[1] < time.monotonic():
+            self._confirmations = {k: v for k, v in self._confirmations.items() if v[1] >= time.monotonic()}
+            token = secrets.token_urlsafe(32)
+            self._confirmations[token] = (binding, time.monotonic() + CONFIRM_SECONDS)
+            return {"status": "needs_confirmation", "impact": impact, "confirm": token,
+                    "undo": f"undo_last_import writes the project back from {backup_path}",
+                    "instruction": "Show this exact impact to the owner; repeat only after approval."}
+        device.begin_read()
+        prior = device.project_tar(project)
+        entry = {"kind": "project", "project": project, "node": 2000 + 1000 * project, "path": report["path"],
+                 "tar_bytes": len(tar), "tar_sha256": impact["tar_sha256"], "backup_path": backup_path,
+                 "prior_sha256": hashlib.sha256(prior).hexdigest(), "prior_bytes": len(prior), "status": "pending"}
+        record = self.journal.create(device_id(live), backup_id, [entry], operation="import_ppak")
+        self.backups.invalidate()
+        return self._write(record, entry, device, tar, "imported")
+
+    def _write(self, record, entry, device, tar, ok_status):
+        project = entry["project"]
+        entry["status"] = "write_attempted" if ok_status == "imported" else "undo_attempted"
+        self.journal.save(record)
+        try:
+            device.write_project(project, tar)
+            device.begin_read()
+            after = device.project_tar(project)
+            if after == tar:
+                entry["verified"], entry["differences"] = "bytes", []
+            else:
+                want, got = _project_summary(tar), _project_summary(after)
+                entry["differences"] = [k for k in want if want[k] != got[k]]
+                entry["verified"] = "decoded" if not entry["differences"] else "mismatch"
+                entry["read_back_sha256"] = hashlib.sha256(after).hexdigest()
+                if entry["differences"]:
+                    raise VerificationFailed("Project read back differs from what was written",
+                                             observed=entry["differences"],
+                                             next_step="read_project the project and compare; restore from the backup if wrong.")
+            entry["status"] = ok_status if entry["verified"] == "bytes" else ok_status + "_with_differences"
+            entry.pop("failure", None)
+            record["status"] = entry["status"]
+        except (DeviceError, ValueError, OSError, tarfile.TarError) as e:
+            entry["status"] = "failed" if ok_status == "imported" else "undo_failed"
+            entry["failure"] = {"error": type(e).__name__, "message": str(e), **getattr(e, "detail", {})}
+            record["status"] = "partial" if ok_status == "imported" else "undo_partial"
+        self.journal.save(record)
+        return self._result(record)
+
+    @staticmethod
+    def _result(record):
+        entry = record["entries"][0]
+        return {**entry, "status": record["status"], "entry_status": entry["status"], "journal_id": record["id"],
+                "transactional": False, "power_cycle_verified": False,
+                "next_step": "read_project to inspect it; take a fresh backup before another write."}
+
+    def undo(self, device):
+        greeting = device.greet()
+        identity = device_id({"sku": greeting.sku, "serial": greeting.serial})
+        records = self.journal.records(identity, operation="import_ppak")
+        if not records:
+            return {"status": "nothing_to_undo"}
+        record = next((r for r in records if r["entries"][0]["status"] in self.REVERTABLE), None)
+        if record is None:
+            return self._result(records[0])
+        entry = record["entries"][0]
+        backup = Path(entry["backup_path"])
+        if not backup.is_file():
+            entry["undo_failure"] = f"backup {backup} is no longer readable"
+            record["status"] = "undo_partial"
+            self.journal.save(record)
+            return self._result(record)
+        _, projects, _ = read_pak(backup.read_bytes())
+        prior = projects[entry["project"]]
+        if hashlib.sha256(prior).hexdigest() != entry["prior_sha256"]:
+            entry["undo_note"] = ("the backup's copy of the project is not byte-identical to what the device "
+                                  "held before the import; it is what verify_backup accepted as current")
+        self.backups.invalidate()
+        return self._write(record, entry, device, prior, "undone")

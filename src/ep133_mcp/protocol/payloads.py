@@ -204,6 +204,22 @@ def file_put_meta(name: str, data_size: int, slot: int) -> bytes:
             + name_bytes + b'\0{"channels":1}')
 
 
+def file_put_project(project: int, data_size: int) -> bytes:
+    """`02 00 05 <2000+1000*project u16> <2000 u16> <size u32> "NN" 00` - a whole project TAR.
+
+    What Sample Tool's `uploadProjectArchive` sends (its bundle, SysExFilePutInitRequest: flags
+    CAPABILITY_READ|FILE_TYPE_FILE = 5, fileId = the project's node, parentId = /projects, the
+    two-digit name from `PNN.tar`, no metadata JSON), followed by the same FILE_PUT_DATA pages
+    and empty terminator as a sample upload. The project node already exists, so this overwrites
+    it in place. docs/research/project-write.md."""
+    if type(project) is not int or not 1 <= project <= 9:
+        raise ValueError('project must be 1..9')
+    if not 0 < data_size <= MAX_UPLOAD_BYTES:
+        raise ValueError('project TAR exceeds verified page range')
+    return (b'\x02\x00\x05' + struct.pack('>HHI', 2000 + 1000 * project, PROJECT_ROOT, data_size)
+            + f'{project:02d}'.encode('ascii') + b'\0')
+
+
 def file_put_data(page: int, data: bytes) -> bytes:
     _check_u16(page, 'page')
     if len(data) > UPLOAD_CHUNK_BYTES:

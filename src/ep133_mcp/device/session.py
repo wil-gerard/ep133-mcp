@@ -131,7 +131,7 @@ class DeviceSession:
         if parsed is not None:
             self._responses.put(parsed)
 
-    def request(self, command: int, payload: bytes) -> Response:
+    def request(self, command: int, payload: bytes, timeout: float | None = None) -> Response:
         """Send one frame and block for its matching response."""
         if self._out is None:
             raise DeviceUnavailable("session not open")
@@ -141,7 +141,7 @@ class DeviceSession:
             import mido
             self._out.send(mido.Message("sysex", data=frame[1:-1]))
             time.sleep(self._delay)
-            deadline = time.monotonic() + self._timeout
+            deadline = time.monotonic() + (timeout if timeout is not None else self._timeout)
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -421,14 +421,33 @@ class DeviceSession:
 
     # ---- captured write operations --------------------------------------
 
-    def _write_request(self, payload: bytes):
-        response = self.request(CMD_FILE, payload)
+    def _write_request(self, payload: bytes, timeout: float | None = None):
+        response = self.request(CMD_FILE, payload, timeout)
         if not response.ok:
-            raise DeviceRejected('device write rejected', status=response.status)
+            raise DeviceRejected('device write rejected', status=response.status,
+                                 reason=response.payload.rstrip(b'\0').decode('latin-1'))
 
     def begin_write(self):
         self.greet()
         self._write_request(P.file_init(P.WRITE_MODE))
+
+    PROJECT_COMMIT_TIMEOUT_S = 15.0   # Sample Tool's timeout for a project put
+
+    def write_project(self, project: int, tar: bytes):
+        """Overwrite one project's TAR the way Sample Tool imports a .ppak (payloads.file_put_project).
+
+        The empty terminator page is where the device commits the file, so it gets Sample Tool's
+        longer timeout; the session is re-initialised afterwards as Sample Tool does. Callers read
+        the project back and compare - a status-0 answer is not proof of what was stored."""
+        meta = P.file_put_project(project, len(tar))  # validate before any I/O
+        self.begin_write()
+        self._write_request(meta)
+        count = (len(tar) + P.UPLOAD_CHUNK_BYTES - 1) // P.UPLOAD_CHUNK_BYTES
+        for page in range(count):
+            offset = page * P.UPLOAD_CHUNK_BYTES
+            self._write_request(P.file_put_data(page, tar[offset:offset + P.UPLOAD_CHUNK_BYTES]))
+        self._write_request(P.file_put_data(count, b''), timeout=self.PROJECT_COMMIT_TIMEOUT_S)
+        self.begin_write()
 
     def upload_sample(self, slot: int, name: str, pcm: bytes):
         meta = P.file_put_meta(name, len(pcm), slot)  # validate before any I/O

@@ -40,7 +40,7 @@ class Device(FakeDevice):
         self.pads[7, "A", 7] = (16, 500)
 
     def greet(self):
-        return SimpleNamespace(sku="TE032AS001", os_version="2.5.1", serial="x")
+        return SimpleNamespace(sku="TE032AS001", os_version="2.5.1", serial="x", product="EP-133")
 
     def active_project(self):
         return self.active
@@ -123,3 +123,136 @@ def test_generate_ppak_output_passes_check(tmp_path):
     report = check_ppak(out, 7, Device())
     assert report["status"] == "ok" and report["contents"]["bpm"] == 99.0
     assert {(p["group"], p["index"]) for p in report["contents"]["patterns"]} == {("A", 1), ("A", 2), ("B", 3)}
+
+
+# ---- import_ppak: the write ---------------------------------------------------------------
+
+from unittest.mock import Mock
+
+from ep133_mcp.device import DeviceError
+from ep133_mcp.safety.import_project import Importer
+from ep133_mcp.safety.journal import Journal
+
+
+class WriteDevice(Device):
+    """Projects live in a dict of TARs; write_project stores what it is given, or mangles it."""
+
+    def __init__(self):
+        super().__init__()
+        self.tars = {n: P.pack_project(minimal_project(pad7_slot=16 if n == 7 else 0)) for n in range(1, 10)}
+        self.written = []
+        self.fail_write = None
+        self.rewrite = None                      # callable applied to the stored bytes (device normalisation)
+
+    def project_tar(self, project):
+        return self.tars[project]
+
+    def write_project(self, project, tar):
+        self.written.append((project, tar))
+        if project == self.fail_write:
+            raise DeviceError("terminator rejected")
+        self.tars[project] = self.rewrite(tar) if self.rewrite else tar
+
+
+def blank_ppak(tmp_path, project=7, bpm=99.0, name="blank.ppak"):
+    files = minimal_project(pad7_slot=0)
+    files["settings"] = __import__("struct").pack("<4xf", bpm) + bytes(214)
+    return ppak(tmp_path, project, files=files, name=name)
+
+
+@pytest.fixture
+def imp(tmp_path):
+    from ep133_mcp.safety.backup import snapshot
+    d = WriteDevice()
+    backups = SimpleNamespace(require_current=Mock(side_effect=lambda *_: snapshot(d)), invalidate=Mock(),
+                              path_of=Mock(return_value=str(tmp_path / "session.pak")))
+    return d, Importer(backups, Journal(tmp_path / "journal")), tmp_path
+
+
+def write_backup_pak(d, path):
+    """A .pak whose project TARs are the device's current ones, for the undo to read from."""
+    import io
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for n in range(1, 10):
+            z.writestr(P.project_entry(n), d.tars[n])
+        z.writestr("/meta.json", json.dumps({"pak_type": "full"}))
+    path.write_bytes(buffer.getvalue())
+
+
+def approve(importer, d, path, project):
+    first = importer.import_ppak(path, project, "backup", d)
+    assert first["status"] == "needs_confirmation" and d.written == []
+    return first, importer.import_ppak(path, project, "backup", d, first["confirm"])
+
+
+def test_import_shows_impact_writes_the_tar_and_verifies_bytes(imp):
+    d, importer, tmp_path = imp
+    path = blank_ppak(tmp_path)
+    first, out = approve(importer, d, path, 7)
+    assert first["impact"]["would_replace"]["pads_assigned"] == 1 and first["impact"]["contents"]["bpm"] == 99.0
+    assert first["impact"]["events"] == 1
+    assert out["status"] == "imported" and out["verified"] == "bytes" and out["differences"] == []
+    assert d.written == [(7, P.read_pak(path.read_bytes())[1][7])]
+    assert P.stored_pads(d.tars[7])[6]["stored_slot"] == 0
+    assert out["prior_bytes"] > 0 and out["backup_path"].endswith("session.pak")
+
+
+def test_import_refuses_problems_and_sound_carrying_files(imp):
+    d, importer, tmp_path = imp
+    with pytest.raises(InvalidDestination):
+        importer.import_ppak(blank_ppak(tmp_path), 3, "backup", d)          # active project
+    with pytest.raises(InvalidDestination):
+        importer.import_ppak(blank_ppak(tmp_path, project=8, name="p8.ppak"), 7, "backup", d)   # wrong project
+    with_sound = ppak(tmp_path, 7, files=minimal_project(pad7_slot=40), sounds={"/sounds/40 x.wav": wav()}, name="s.ppak")
+    with pytest.raises(InvalidDestination):
+        importer.import_ppak(with_sound, 7, "backup", d)
+    assert d.written == []
+
+
+def test_import_accepts_a_device_normalised_read_back(imp):
+    d, importer, tmp_path = imp
+    d.rewrite = lambda tar: tar + bytes(512)             # same content, extra padding block
+    _, out = approve(importer, d, blank_ppak(tmp_path), 7)
+    assert out["status"] == "imported_with_differences" and out["verified"] == "decoded"
+    assert out["differences"] == [] and "read_back_sha256" in out
+
+
+def test_import_fails_when_the_read_back_differs(imp):
+    d, importer, tmp_path = imp
+    d.rewrite = lambda tar: P.pack_project(minimal_project(pad7_slot=16))   # the write did not take
+    _, out = approve(importer, d, blank_ppak(tmp_path), 7)
+    assert out["status"] == "partial" and out["failure"]["error"] == "VerificationFailed"
+    assert "pads" in out["differences"]
+
+
+def test_import_reports_a_rejected_write(imp):
+    d, importer, tmp_path = imp
+    d.fail_write = 7
+    _, out = approve(importer, d, blank_ppak(tmp_path), 7)
+    assert out["status"] == "partial" and out["failure"]["error"] == "DeviceError"
+
+
+def test_undo_writes_the_backup_copy_back(imp):
+    d, importer, tmp_path = imp
+    write_backup_pak(d, tmp_path / "session.pak")
+    before = d.tars[7]
+    approve(importer, d, blank_ppak(tmp_path), 7)
+    assert d.tars[7] != before
+    out = importer.undo(d)
+    assert out["status"] == "undone" and out["verified"] == "bytes" and d.tars[7] == before
+    assert importer.undo(d)["status"] == "undone"       # nothing left: reports, no write
+    assert len(d.written) == 2
+
+
+def test_undo_without_the_backup_file(imp):
+    d, importer, tmp_path = imp
+    approve(importer, d, blank_ppak(tmp_path), 7)
+    out = importer.undo(d)
+    assert out["status"] == "undo_partial" and "no longer readable" in out["undo_failure"]
+    assert len(d.written) == 1
+
+
+def test_nothing_to_undo(imp):
+    d, importer, _ = imp
+    assert importer.undo(d) == {"status": "nothing_to_undo"}

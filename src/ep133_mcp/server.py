@@ -34,7 +34,7 @@ from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
 from .safety.chop import Chopper
 from .safety.clear import Clearer
-from .safety.import_project import check_ppak as _check_ppak
+from .safety.import_project import Importer, check_ppak as _check_ppak
 from .safety.delete import Deleter
 from .safety.install import Installer
 from .safety.journal import Journal
@@ -70,6 +70,7 @@ _deleter = Deleter(_backups, _journal)
 _params = ParamWriter(_backups, _journal)
 _chopper = Chopper(_backups, _journal)
 _clearer = Clearer(_backups, _journal)
+_importer = Importer(_backups, _journal)
 
 
 def _device() -> DeviceSession:
@@ -755,6 +756,44 @@ def check_ppak(path: str, project: int) -> dict[str, Any]:
     try:
         with _operation_lock:
             return _check_ppak(path, project, _device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="import_ppak",
+    description=(
+        "Write a .ppak's project TAR to project N (1..9) over SysEx, the way Sample Tool imports "
+        "it (its uploadProjectArchive: FILE_PUT_META at the project node, data pages, terminator). "
+        "Runs check_ppak first and refuses on any problem, including N being the active project; "
+        "files that carry sounds are refused (install_sample them first). Requires a verified "
+        "current backup_id and returns needs_confirmation with the file's bpm/pads/patterns/scenes "
+        "and what project N holds now; show that to the owner and repeat with confirm. The project "
+        "is read back afterwards and compared byte-for-byte, then field-by-field if the bytes "
+        "differ. undo_last_import writes the verified backup's copy of the project back. "
+        "Power-cycle persistence is a separate check."
+    ),
+)
+def import_ppak(path: str, project: int, backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _importer.import_ppak(path, project, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="undo_last_import",
+    description=(
+        "Write back the project as the verified backup held it before the newest import_ppak "
+        "that still stands, then read it back and compare. Calling again reaches the next older "
+        "import."
+    ),
+)
+def undo_last_import() -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _importer.undo(_device())
     except DeviceError as e:
         return _error(e)
 

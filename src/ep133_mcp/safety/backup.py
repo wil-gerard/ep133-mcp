@@ -177,6 +177,11 @@ class BackupRegistry:
         self._verified[backup_id] = entry
         return live
 
+    def path_of(self, backup_id):
+        """The verified file behind a backup_id, or None once it has been invalidated."""
+        entry = self._verified.get(backup_id)
+        return None if entry is None else str(entry[0])
+
     def invalidate(self):
         self._verified.clear()
 
