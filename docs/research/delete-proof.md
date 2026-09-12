@@ -60,3 +60,21 @@ reason `failed to delete`**. Library 58 before and after, free bytes
 unchanged, slot intact. So the `failed to delete` branch above is the one:
 next try a slot the MCP uploaded itself — slot 30 (`mcp_sample`) once
 B02–B09 are cleared.
+
+## Third attempt (2026-09-12, slot 30 — MCP-uploaded, unreferenced)
+
+`delete_samples([30], session-13.pak)` after `undo_last_chop` had cleared
+B02–B09 (`referenced_by []` in the impact) → `DeviceRejected`, **status 1,
+reason `failed to delete`** — the same answer as slot 704. Journal
+`401b9125…`, library 58 → 58, free bytes 26 409 768 unchanged, slot 30
+intact. So the refusal is not about protected or Sample-Tool content:
+`06 02 <id>` after a write-mode `FILE_INIT` does not delete anything on
+OS 2.5.1. Upstream never verified the command either (PROTOCOL.md ❌).
+
+The tool now says so: `delete_samples`' description states it, and a
+`failed to delete` answer sets `next_step` to "delete with Sample Tool;
+nothing changed". Untried and parked: FILE_DELETE after a read-mode
+`FILE_INIT` or with no init, and other values of the `02` area byte —
+each is a speculative write and upstream's wedge history (§11) says not
+to send unknown write-side frames without a reason. The 46-slot bulk
+delete stays with Sample Tool.

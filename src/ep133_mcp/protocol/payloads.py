@@ -35,12 +35,13 @@ def file_init(mode: int, max_response: int = DEFAULT_MAX_RESPONSE) -> bytes:
 
 
 def file_delete(file_id: int) -> bytes:
-    """`06 02 <file_id u16 BE>`. UNVERIFIED on this device.
+    """`06 02 <file_id u16 BE>`. REJECTED on OS 2.5.1.
 
-    Upstream's PROTOCOL.md documents this as FILE_DELETE and marks it destructive; it also lists
-    a "failed to delete" error string, which is the only evidence the command exists. Nothing
-    here has been sent to hardware, so every caller must treat a success status as unproven
-    until docs/research/ records a delete that a backup diff confirms."""
+    Upstream's PROTOCOL.md documents this as FILE_DELETE and marks it destructive. Sent after a
+    write-mode FILE_INIT it is answered with status 1 "failed to delete" for a Sample Tool slot
+    (704) and an MCP-uploaded, unreferenced slot (30) alike (docs/research/delete-proof.md,
+    2026-09-11/12); no delete has ever succeeded here, so every caller must treat a success
+    status as unproven until a backup diff confirms one."""
     _check_u16(file_id, "file_id")
     return struct.pack(">BBH", FILE_DELETE, 0x02, file_id)
 

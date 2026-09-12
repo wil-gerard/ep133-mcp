@@ -129,8 +129,16 @@ class Deleter:
             record["status"] = "deleted"
             self.journal.save(record)
         after = snapshot(device)
+        next_step = "Take a fresh backup: the verified one is now stale."
+        if any(e.get("failure", {}).get("reason") == "failed to delete" for e in results):
+            # Observed on OS 2.5.1 for a Sample Tool slot (704) and an MCP-uploaded, unreferenced
+            # slot (30) alike, 2026-09-11/12 (docs/research/delete-proof.md): the firmware answers
+            # FILE_DELETE and refuses it. Nothing was removed and the backup is still current.
+            next_step = ("The device refused the delete ('failed to delete'): FILE_DELETE as sent "
+                         "here does not remove slots on this OS. Delete with Sample Tool instead; "
+                         "nothing changed on the device.")
         return {"status": record["status"], "journal_id": record["id"], "entries": results,
                 "library_slots_before": len(live["slots"]), "library_slots_after": len(after["slots"]),
                 "free_bytes": device.sample_root().free_space_in_bytes,
                 "verified": "each slot re-read from the device after its delete",
-                "next_step": "Take a fresh backup: the verified one is now stale."}
+                "next_step": next_step}

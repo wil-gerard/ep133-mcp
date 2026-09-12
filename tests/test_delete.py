@@ -120,6 +120,7 @@ def test_a_failure_stops_and_is_reported(setup):
     assert [e['status'] for e in result['entries']] == ['deleted', 'failed']
     assert result['entries'][1]['failure']['reason'] == 'failed to delete'
     assert result['entries'][1]['failure']['status'] == 1                 # the device's own status/reason survive
+    assert result['next_step'].startswith("The device refused the delete ('failed to delete')")
     assert 18 in d.slots and d.deletes == [15, 16]      # stopped before the third
 
 
