@@ -18,8 +18,8 @@ hand-played their own (`P03 d14`, "about 90% there").
 | # | Step | Status |
 |---|---|---|
 | 2 | Velocity experiment on hardware | **done** — see below |
-| 1 | Groove fidelity, offline against `d14` (`54u38l9h`, `qfsgupwm`) | **next** |
-| 3 | Second end-to-end run; prove `import_ppak`; reinstall D10–D12 | after 1 |
+| 1 | Groove fidelity, offline against `d14` (`54u38l9h`, `qfsgupwm`) | **done** 2026-09-12 — [`groove-fidelity-d14.md`](../research/groove-fidelity-d14.md): recall 0.52 → 0.77, precision 0.16 → 0.84; kick exact, pads by sound. Slice contamination filed as `nzcrfqjv` |
+| 3 | Second end-to-end run; prove `import_ppak`; reinstall D10–D12 | **next** |
 | 4 | Freesound mode (`8c98vpbn`, `mpm79kpo`) | after 3 |
 
 ## Done this session
