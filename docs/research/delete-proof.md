@@ -52,3 +52,11 @@ Start a fresh server (the fix is in it), re-run the same
 one-slot proof completes or one of the branches above is the next
 experiment. The 46-slot bulk delete stays parked until a one-slot delete
 has been proven by a backup diff.
+
+## Second attempt (2026-09-12, fixed server)
+
+`delete_samples([704], session-12.pak)` → `DeviceRejected`, **status 1,
+reason `failed to delete`**. Library 58 before and after, free bytes
+unchanged, slot intact. So the `failed to delete` branch above is the one:
+next try a slot the MCP uploaded itself — slot 30 (`mcp_sample`) once
+B02–B09 are cleared.
