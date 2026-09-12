@@ -29,7 +29,7 @@ async def test_handshake_lists_tools():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
     assert tools == {"device_info", "server_status", "list_pads", "verify_backup", "restore_procedure",
-                     "read_pad", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
+                     "read_pad", "read_project", "install_sample", "install_kit", "undo_last_install", "delete_samples", "create_backup", "fetch_reference",
                      "analyze_reference", "extract_kit", "transcribe_groove", "generate_ppak"}
 
 
@@ -199,6 +199,13 @@ module.main()
             assert written['status'] == 'written' and written['verified_on_device'] is False
             assert {m['member'] for m in written['manifest']} == {'settings', 'patterns/a02', 'scenes'}
             assert written['patterns_written'] == {'patterns/a02': pattern['steps']}
+            offline = _payload(await session.call_tool('read_project', {'project': 7, 'source': str(template)}))
+            assert offline['bpm'] == 120.0 and len(offline['pads']) == 48 and offline['source'] == str(template)
+            assert [p['index'] for p in offline['patterns']] == [1, 3]
+            missing = _payload(await session.call_tool('read_project', {'project': 2, 'source': str(template)}))
+            assert missing['error'] == 'InvalidInput'
+            live_read = _payload(await session.call_tool('read_project', {'project': 1}))
+            assert live_read['source'] == 'device' and live_read['bpm'] is None and live_read['patterns'] == []
             live = _payload(await session.call_tool('generate_ppak', {
                 'out': str(tmp_path / 'live.ppak'), 'project': 1, 'bpm': 97.0}))
             assert live['error'] == 'InvalidInput' and 'flavour' in live['message']   # fake device writes ustar

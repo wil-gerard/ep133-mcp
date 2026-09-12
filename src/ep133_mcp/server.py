@@ -12,7 +12,9 @@ import logging
 import os
 from pathlib import Path
 import sys
+import tarfile
 import threading
+import zipfile
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -24,6 +26,7 @@ from .audio.groove import transcribe_groove as _transcribe_groove
 from .audio.kit import extract_kit as _extract_kit
 from .audio.reference import MAX_CLIP_SECONDS, fetch_reference as _fetch_reference
 from .device import DeviceError, DeviceSession, DeviceUnavailable
+from .protocol import decode as _decode
 from .protocol import generate as _generate
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
@@ -158,6 +161,43 @@ def read_pad(project: int, group: str, pad: int) -> dict[str, Any]:
             return _device().read_pad(project, group, pad)
     except DeviceError as e:
         log.warning("read_pad failed: %s", e)
+        return _error(e)
+
+
+@server.tool(
+    name="read_project",
+    description=(
+        "Decode a whole project (1..9): bpm, all 48 stored pad records, every pattern file as "
+        "{group, index, bars, events: [{pad, tick, duration, note, byte4, byte7}], automation: "
+        "[{tick, param, value}] for recorded fader moves (type-1 events, never decoded as notes)}, "
+        "the scenes file (populated scenes, live pattern per group, selected scene, song), and the "
+        "raw settings / fx_settings floats. Ticks are 384 per bar; pads use the list_pads index. "
+        "source=<.pak/.ppak path> decodes that file's copy offline instead of reading the device; "
+        "otherwise the project TAR is read live (read-only, no backup gate). Field meanings and "
+        "their verification status are in docs/research/pattern-encoding.md."
+    ),
+)
+def read_project(project: int, source: str | None = None) -> dict[str, Any]:
+    if type(project) is not int or not 1 <= project <= 9:
+        return {"error": "InvalidProject", "message": "project must be 1..9"}
+    try:
+        if source is not None:
+            path = Path(source).expanduser()
+            if not path.is_file():
+                return {"error": "InvalidInput", "message": f"source not found: {path}"}
+            tar = _decode.project_from_pak(path.read_bytes(), project)
+            origin = {"source": str(path)}
+        else:
+            with _operation_lock:
+                d = _device()
+                d.greet()
+                tar = d.project_tar(project)
+            origin = {"source": "device"}
+        return {"project": project, **origin, "tar_bytes": len(tar), **_decode.decode_project(tar)}
+    except (ValueError, OSError, tarfile.TarError, zipfile.BadZipFile) as e:   # not a project
+        return {"error": "InvalidInput", "message": str(e)}
+    except DeviceError as e:
+        log.warning("read_project failed: %s", e)
         return _error(e)
 
 

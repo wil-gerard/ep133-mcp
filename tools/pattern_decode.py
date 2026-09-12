@@ -28,6 +28,11 @@ import struct
 import sys
 import tarfile
 import zipfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from ep133_mcp.protocol import decode as D  # noqa: E402
 
 TICKS_PER_BAR = 384
 EVENT_SIZE = 8
@@ -83,84 +88,55 @@ def load_projects(path: str) -> dict[str, dict[str, bytes]]:
 
 
 # ----- Decoding --------------------------------------------------------------
+# The decoders live in the package (ep133_mcp.protocol.decode) so read_project and this
+# CLI cannot drift apart; these wrappers only reshape their output for the dump/check commands.
 
 
 def decode_pattern(b: bytes) -> dict:
-    if len(b) < PATTERN_HEADER or (len(b) - PATTERN_HEADER) % EVENT_SIZE:
-        raise ValueError(f"pattern size {len(b)} is not 4 + 8n")
-    n = (len(b) - PATTERN_HEADER) // EVENT_SIZE
+    decoded = D.decode_pattern_file(b)
     events = []
-    for i in range(n):
-        e = b[PATTERN_HEADER + EVENT_SIZE * i : PATTERN_HEADER + EVENT_SIZE * (i + 1)]
+    for off in range(PATTERN_HEADER, len(b), EVENT_SIZE):
+        e = b[off:off + EVENT_SIZE]
         pos, = struct.unpack_from("<H", e, 0)
         typ = e[2] & 7
         ev = {"pos": pos, "type": typ, "byte7": e[7], "raw": e.hex()}
         if typ == EVENT_TYPE_NOTE:
-            ev.update(pad=(e[2] >> 3) + 1, note=e[3], vel=e[4],
-                      dur=struct.unpack_from("<H", e, 5)[0])
+            ev.update(pad=(e[2] >> 3) + 1, note=e[3], vel=e[4], dur=struct.unpack_from("<H", e, 5)[0])
         else:
-            ev.update(padbits=e[2] >> 3, param=e[3], byte4=e[4],
-                      value=struct.unpack_from("<H", e, 5)[0])
+            ev.update(padbits=e[2] >> 3, param=e[3], byte4=e[4], value=struct.unpack_from("<H", e, 5)[0])
         events.append(ev)
-    return {
-        "header": b[:PATTERN_HEADER].hex(),
-        "byte0": b[0],
-        "bars": b[1],
-        "count": b[2],
-        "byte3": b[3],
-        "events": events,
-    }
+    assert len(events) == len(decoded["events"]) + len(decoded["automation"]) + len(decoded["other"])
+    return {"header": b[:PATTERN_HEADER].hex(), "byte0": b[0], "bars": decoded["bars"], "count": b[2],
+            "byte3": b[3], "events": events}
 
 
 def decode_scenes(b: bytes) -> dict:
-    head = b[:SCENES_HEAD]
-    chunks = []
-    for i in range(SCENE_SLOTS):
-        c = b[SCENES_HEAD + SCENE_CHUNK * i : SCENES_HEAD + SCENE_CHUNK * (i + 1)]
-        if len(c) < SCENE_CHUNK:
-            break
-        chunks.append({"scene": i + 1, "a": c[0], "b": c[1], "c": c[2], "d": c[3],
-                       "num": c[4], "den": c[5]})
-    trailer = b[SCENES_HEAD + SCENE_CHUNK * len(chunks):]
+    d = D.decode_scenes(b)
+    trailer = bytes.fromhex(d["trailer"])
     out = {
-        "size": len(b),
-        "head": {"byte0": head[0], "live": list(head[1:5]), "num": head[5], "den": head[6]},
-        "populated": [c for c in chunks if c["a"] or c["b"] or c["c"] or c["d"]],
-        "trailer": trailer.hex(),
-        "trailer_u32be": [struct.unpack_from(">I", trailer, o)[0]
-                          for o in range(0, len(trailer) - 3, 4)][:3],
+        "size": d["size"],
+        "head": {"byte0": b[0], "live": [d["live"][g] for g in "ABCD"], "num": d["live"]["num"], "den": d["live"]["den"]},
+        "populated": [{"scene": c["scene"], "a": c["A"], "b": c["B"], "c": c["C"], "d": c["D"],
+                       "num": c["num"], "den": c["den"]} for c in d["scenes"]],
+        "trailer": d["trailer"],
+        "trailer_u32be": [struct.unpack_from(">I", trailer, o)[0] for o in range(0, len(trailer) - 3, 4)][:3],
     }
-    if len(trailer) >= 12:
-        out["song_len"] = trailer[11]
-        out["song_positions"] = list(trailer[12 : 12 + trailer[11]])
+    if "song" in d:
+        out["song_len"] = len(d["song"])
+        out["song_positions"] = d["song"]
     return out
 
 
-def _floats(b: bytes, start: int, count: int) -> list[float]:
-    return [struct.unpack_from("<f", b, start + 4 * i)[0] for i in range(count)]
-
-
 def decode_settings(b: bytes) -> dict:
-    return {
-        "size": len(b),
-        "bytes0_3": b[0:4].hex(),
-        "bpm": struct.unpack_from("<f", b, 4)[0],
-        "bytes8_23": b[8:24].hex(),
-        "params": _floats(b, 24, 48),
-        "group_bytes": list(b[216:220]),
-        "tail": b[220:].hex(),
-    }
+    d = D.decode_settings(b)
+    return {"size": d["size"], "bytes0_3": b[0:4].hex(), "bpm": d["bpm"], "bytes8_23": b[8:24].hex(),
+            "params": d["params"], "group_bytes": d["group_bytes"], "tail": d["tail"]}
 
 
 def decode_fx_settings(b: bytes) -> dict:
-    return {
-        "size": len(b),
-        "bytes0_3": b[0:4].hex(),
-        "fx": b[4],
-        "bytes5_7": b[5:8].hex(),
-        "params": _floats(b, 8, 34),
-        "tail": b[144:].hex(),
-    }
+    d = D.decode_fx_settings(b)
+    return {"size": d["size"], "bytes0_3": b[0:4].hex(), "fx": d["selector"], "bytes5_7": b[5:8].hex(),
+            "params": d["params"], "tail": d["tail"]}
 
 
 def decode_project(files: dict[str, bytes]) -> dict:
