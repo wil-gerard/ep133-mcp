@@ -33,6 +33,7 @@ from .protocol.payloads import SAMPLE_ROOT
 from .safety.backup import BackupRegistry, RESTORE_PROCEDURE
 from .safety.capture import create_backup as _create_backup
 from .safety.chop import Chopper
+from .safety.clear import Clearer
 from .safety.import_project import check_ppak as _check_ppak
 from .safety.delete import Deleter
 from .safety.install import Installer
@@ -68,6 +69,7 @@ _installer = Installer(_backups, _journal)
 _deleter = Deleter(_backups, _journal)
 _params = ParamWriter(_backups, _journal)
 _chopper = Chopper(_backups, _journal)
+_clearer = Clearer(_backups, _journal)
 
 
 def _device() -> DeviceSession:
@@ -390,6 +392,43 @@ def undo_last_chop() -> dict[str, Any]:
     try:
         with _operation_lock:
             return _chopper.undo(_device())
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="clear_pads",
+    description=(
+        "Write sym 0 to every stored pad in whole projects (1..9) so the slots they held can be "
+        "deleted; stale references are cleared too. Refuses the active project - switch the "
+        "device to the project you are keeping first. Requires a verified current backup_id and "
+        "returns needs_confirmation listing every pad, its stored slot and name; show that to "
+        "the owner and repeat with confirm. One journal for the whole call; each pad's stored "
+        "record and JSON are re-read after its write. Not a transaction: stops at the first "
+        "failure and reports every entry. undo_last_clear re-points pads at prior slots that "
+        "still exist."
+    ),
+)
+def clear_pads(projects: list[int], backup_id: str, confirm: str | None = None) -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _clearer.clear(projects, backup_id, _device(), confirm)
+    except DeviceError as e:
+        return _error(e)
+
+
+@server.tool(
+    name="undo_last_clear",
+    description=(
+        "Revert the newest clear_pads journal that still has pads to revert: each pad still at "
+        "sym 0 gets its prior slot and the trim/playmode the record held, then is read back. A "
+        "prior slot since deleted stays cleared and is reported in undo_note."
+    ),
+)
+def undo_last_clear() -> dict[str, Any]:
+    try:
+        with _operation_lock:
+            return _clearer.undo(_device())
     except DeviceError as e:
         return _error(e)
 

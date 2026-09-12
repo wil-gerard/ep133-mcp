@@ -240,6 +240,23 @@ the library (a stale reference, which resolves to an empty pad) is cleared to
 so; `undo_last_install` follows the same rule. The uploaded slot stays in
 the library.
 
+### `clear_pads(projects, backup_id, confirm=None)`
+Every pad in the named projects whose stored record holds a nonzero slot is
+written to `sym 0` and read back (stored record plus JSON; a length the
+device leaves behind is reported, not failed). Stale references are cleared
+too, so the records come out clean. The active project is refused - switch
+the device to the project being kept first. One confirmation carrying every
+pad, its stored slot and name; one journal; stops at the first failure and
+reports each entry. This is the step before `delete_samples` on a whole
+library: a slot is deletable only once no record stores it.
+
+### `undo_last_clear()`
+Newest `clear_pads` journal with pads left to revert, in reverse order: a
+pad still at `sym 0` gets `{sym: prior_slot}` plus the trim/playmode its
+record held, then its stored record must equal the prior one. A pad changed
+since is left alone; a prior slot since deleted stays cleared with
+`undo_note` saying so. Calling again reaches the next older journal.
+
 ### `undo_last_pad_change()`
 Writes the `before` values of the latest `set_pad`/`set_slot` journal back
 and reads the record. A key the record did not hold before the change cannot

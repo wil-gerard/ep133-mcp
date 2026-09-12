@@ -54,12 +54,13 @@ For a client supporting `mcpServers`, replace the path with your checkout:
 | `transcribe_groove` | The clip's drums as `x`/`.` strings per kit pad on a 16th grid, in the shape `generate_ppak` takes |
 | `generate_ppak` | Patch a device-written project (BPM, pads, patterns with per-event note and fader automation, scenes, raw fx/settings floats) into a `.ppak` for Sample Tool import; no device writes |
 | `create_backup` | Write a full `.pak` by reading the device over SysEx; incremental against a base backup |
-| `delete_samples` | Delete unreferenced library slots after confirmation; each slot re-read afterwards (the device rejected the first attempt — `docs/research/delete-proof.md`) |
+| `delete_samples` | Delete unreferenced library slots after confirmation; each slot re-read afterwards and proven by backup diff (`docs/research/delete-proof.md`) |
 | `read_pad` | One pad's complete JSON record plus its slot's, unfiltered |
 | `read_project` | A project decoded: bpm, pad records, patterns (notes and automation apart), scenes, settings floats; live or from a `.pak` |
 | `set_pad` / `set_slot` | Per-pad and per-slot sound parameters (trim, playmode, envelope, pitch, level, pan...) with read-back reporting applied / changed / dropped |
 | `chop_sample` | One upload, up to 12 pads trimmed to equal, onset-detected or explicit slices |
-| `undo_last_pad_change` / `undo_last_chop` | Write back the journalled previous values |
+| `clear_pads` | Empty whole non-active projects (every stored pad to `sym 0`) so their slots become deletable; one confirmation, one journal |
+| `undo_last_pad_change` / `undo_last_chop` / `undo_last_clear` | Write back the journalled previous values |
 | `check_ppak` | Preflight a `.ppak` for import: right project, device flavour, referenced slots, what it replaces |
 | `diff_project` | Name every changed settings / fx_settings field between two copies of a project |
 | `list_files` / `stat_file` | Walk the device's file-id namespace; STAT one id |
